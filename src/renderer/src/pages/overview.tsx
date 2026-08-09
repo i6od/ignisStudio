@@ -48,7 +48,7 @@ export function OverviewPage({ tk, onNavigate }: { tk: Tk; onNavigate: (p: PageI
             connected={vcConnected}
           />
           <ConnCard
-            label="TikTok feed"
+            label="Tikfinity feed"
             status={tk.tiktokStatus}
             url={tk.urls.tiktokUrl}
             connected={ttConnected}
@@ -60,7 +60,7 @@ export function OverviewPage({ tk, onNavigate }: { tk: Tk; onNavigate: (p: PageI
       <PageSection
         icon={<Activity className="h-4 w-4" />}
         title="Live feed"
-        description="Most recent TikTok events"
+        description="Most recent Tikfinity events"
       >
         <div className="max-h-72 space-y-1 overflow-y-auto">
           {tk.events.length === 0 && <p className="text-sm text-zinc-500">Waiting for events…</p>}
@@ -184,7 +184,7 @@ function AdvancedEndpoints({ tk }: { tk: Tk }) {
         onChange={setVc}
       />
       <EndpointRow
-        label="TikTok feed"
+        label="Tikfinity feed"
         value={tt}
         onChange={setTt}
       />

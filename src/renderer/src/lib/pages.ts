@@ -1,1 +1,1 @@
-export type PageId = 'overview' | 'triggers' | 'mappings' | 'logs' | 'supporters' | 'about'
+export type PageId = 'overview' | 'triggers' | 'mappings' | 'supporters' | 'about'

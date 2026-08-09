@@ -1,11 +1,10 @@
-import { Cable, Info, LayoutDashboard, ListChecks, Rocket, ScrollText, Trophy } from 'lucide-react'
+import { Cable, Info, LayoutDashboard, ListChecks, Rocket, Trophy } from 'lucide-react'
 import { useState } from 'react'
 
 import { ConnectionStatusBadge } from '@/components/bridge-parts'
 import { Button } from '@/components/ui/button'
 import { useTikfinity } from '@/hooks/use-tikfinity'
 import { AboutPage } from '@/pages/about'
-import { LogPage } from '@/pages/log'
 import { MappingsPage } from '@/pages/mappings'
 import { OverviewPage } from '@/pages/overview'
 import { SupportersPage } from '@/pages/supporters'
@@ -18,7 +17,6 @@ const NAV: { id: PageId; label: string; icon: React.ReactNode }[] = [
   { id: 'triggers', label: 'Triggers', icon: <ListChecks className="h-4 w-4" /> },
   { id: 'mappings', label: 'Mappings', icon: <Rocket className="h-4 w-4" /> },
   { id: 'supporters', label: 'Supporters', icon: <Trophy className="h-4 w-4" /> },
-  { id: 'logs', label: 'Logs', icon: <ScrollText className="h-4 w-4" /> },
   { id: 'about', label: 'About', icon: <Info className="h-4 w-4" /> }
 ]
 
@@ -75,7 +73,7 @@ export default function App() {
           </p>
           <div className="flex items-center gap-2">
             <ConnectionStatusBadge status={tk.vconnectStatus} label="VConnect" />
-            <ConnectionStatusBadge status={tk.tiktokStatus} label="TikTok" />
+            <ConnectionStatusBadge status={tk.tiktokStatus} label="Tikfinity" />
             <Button
               size="sm"
               variant="outline"
@@ -93,7 +91,6 @@ export default function App() {
           {page === 'mappings' && <MappingsPage tk={tk} />}
           {page === 'supporters' && <SupportersPage tk={tk} />}
           {page === 'about' && <AboutPage />}
-          {page === 'logs' && <LogPage tk={tk} />}
         </main>
       </div>
     </div>

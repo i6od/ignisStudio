@@ -4,7 +4,7 @@ const DEFAULT_VCONNECT_URL = 'ws://localhost:39542';
 const DEFAULT_TIKTOK_URL = 'ws://localhost:21213';
 const RETRY_DELAY = 30000;
 const TIKTOK_RETRY_DELAY = 5000;
-const DEFAULT_STORAGE_KEY = 'vconnectTikTokConfig';
+const DEFAULT_STORAGE_KEY = 'vconnectTikfinityConfig';
 
 export class TikfinitySystem {
     constructor(options = {}) {
@@ -113,7 +113,7 @@ export class TikfinitySystem {
       }
     }
 
-    setTikTokStatus(status, className) {
+    setTikfinityStatus(status, className) {
       this.emit('tiktokStatus', { status, className });
       const textEl = document.getElementById('tiktok-status-text');
       const divEl = document.getElementById('tiktok-status');
@@ -162,14 +162,14 @@ export class TikfinitySystem {
       this.log('VConnect manually disconnected');
     }
 
-    disconnectTikTok() {
+    disconnectTikfinity() {
       if (this.tiktokSocket) {
         this.tiktokSocket.onclose = null;
         this.tiktokSocket.close();
         this.tiktokSocket = null;
       }
-      this.setTikTokStatus('Disconnected', 'disconnected');
-      this.log('TikTok manually disconnected');
+      this.setTikfinityStatus('Disconnected', 'disconnected');
+      this.log('Tikfinity manually disconnected');
     }
 
     connectVConnect() {
@@ -283,9 +283,9 @@ export class TikfinitySystem {
       return true;
     }
 
-    connectTikTok() {
+    connectTikfinity() {
       if (this.tiktokSocket && this.tiktokSocket.readyState === WebSocket.OPEN) {
-        this.log('TikTok WebSocket is already connected');
+        this.log('Tikfinity WebSocket is already connected');
         return;
       }
 
@@ -294,71 +294,71 @@ export class TikfinitySystem {
       }
 
       try {
-        this.setTikTokStatus('Connecting...', 'connecting');
+        this.setTikfinityStatus('Connecting...', 'connecting');
         this.tiktokSocket = new WebSocket(this.tiktokUrl);
 
         this.tiktokSocket.onopen = () => {
-          this.setTikTokStatus('Connected', 'connected');
-          this.log('TikTok WebSocket connection established');
+          this.setTikfinityStatus('Connected', 'connected');
+          this.log('Tikfinity WebSocket connection established');
           this.tiktokReconnectAttempts = 0;
           this.saveConfig();
         };
 
         this.tiktokSocket.onmessage = (event) => {
-          this.handleTikTokMessage(event);
+          this.handleTikfinityMessage(event);
         };
 
         this.tiktokSocket.onclose = () => {
-          this.setTikTokStatus('Disconnected', 'disconnected');
-          this.log('TikTok Connection closed. Attempting to reconnect...');
+          this.setTikfinityStatus('Disconnected', 'disconnected');
+          this.log('Tikfinity Connection closed. Attempting to reconnect...');
           this.tiktokReconnectAttempts++;
           const backoffDelay = Math.min(30000, TIKTOK_RETRY_DELAY * Math.pow(1.5, this.tiktokReconnectAttempts - 1));
-          this.log(`Will retry TikTok connection in ${Math.round(backoffDelay / 1000)} seconds...`);
-          setTimeout(() => this.connectTikTok(), backoffDelay);
+          this.log(`Will retry Tikfinity connection in ${Math.round(backoffDelay / 1000)} seconds...`);
+          setTimeout(() => this.connectTikfinity(), backoffDelay);
         };
 
         this.tiktokSocket.onerror = () => {
-          this.setTikTokStatus('Error', 'disconnected');
-          this.log('TikTok WebSocket error', true);
+          this.setTikfinityStatus('Error', 'disconnected');
+          this.log('Tikfinity WebSocket error', true);
         };
       } catch (e) {
-        this.setTikTokStatus('Error', 'disconnected');
-        this.log(`Failed to create TikTok WebSocket: ${e.message}`, true);
+        this.setTikfinityStatus('Error', 'disconnected');
+        this.log(`Failed to create Tikfinity WebSocket: ${e.message}`, true);
         this.tiktokReconnectAttempts++;
         const backoffDelay = Math.min(30000, TIKTOK_RETRY_DELAY * Math.pow(1.5, this.tiktokReconnectAttempts - 1));
-        setTimeout(() => this.connectTikTok(), backoffDelay);
+        setTimeout(() => this.connectTikfinity(), backoffDelay);
       }
     }
 
-    handleTikTokMessage(event) {
+    handleTikfinityMessage(event) {
       try {
         const jsonData = JSON.parse(event.data);
 
         if (jsonData.event === 'gift') {
-          this.handleTikTokGift(jsonData.data);
+          this.handleTikfinityGift(jsonData.data);
         } else if (jsonData.event === 'subscribe') {
-          this.handleTikTokSubscribe(jsonData.data);
+          this.handleTikfinitySubscribe(jsonData.data);
         } else if (jsonData.event === 'follow') {
-          this.handleTikTokFollow(jsonData.data);
+          this.handleTikfinityFollow(jsonData.data);
         } else if (jsonData.event === 'like') {
-          this.handleTikTokLike(jsonData.data);
+          this.handleTikfinityLike(jsonData.data);
         } else if (jsonData.event === 'comment' || jsonData.event === 'chat') {
-          this.handleTikTokComment(jsonData.data);
+          this.handleTikfinityComment(jsonData.data);
         }
       } catch (e) {
-        this.log(`Error parsing TikTok message: ${e.message}`, true);
+        this.log(`Error parsing Tikfinity message: ${e.message}`, true);
       }
     }
 
-    handleTikTokComment(commentData) {
+    handleTikfinityComment(commentData) {
       const message = (commentData.comment || commentData.message || '').toString();
       const shortMessage = message.length > 60 ? `${message.slice(0, 57)}...` : message;
-      this.log(`TikTok Comment: ${commentData.nickname} (${commentData.uniqueId}): ${shortMessage}`);
+      this.log(`Tikfinity Comment: ${commentData.nickname} (${commentData.uniqueId}): ${shortMessage}`);
       this.emit('comment', commentData);
     }
 
-    handleTikTokGift(giftData) {
-      this.log(`TikTok Gift: ${giftData.nickname} sent ${giftData.giftName} x${giftData.repeatCount}`);
+    handleTikfinityGift(giftData) {
+      this.log(`Tikfinity Gift: ${giftData.nickname} sent ${giftData.giftName} x${giftData.repeatCount}`);
       this.emit('gift', giftData);
 
       this.setText('lastGiftName', giftData.giftName);
@@ -376,8 +376,8 @@ export class TikfinitySystem {
       }
     }
 
-    handleTikTokSubscribe(subscribeData) {
-      this.log(`TikTok Subscribe: ${subscribeData.nickname} (${subscribeData.uniqueId}) subscribed for ${subscribeData.subMonth} months`);
+    handleTikfinitySubscribe(subscribeData) {
+      this.log(`Tikfinity Subscribe: ${subscribeData.nickname} (${subscribeData.uniqueId}) subscribed for ${subscribeData.subMonth} months`);
       this.emit('subscribe', subscribeData);
 
       this.setText('lastSubscriberName', subscribeData.uniqueId);
@@ -394,8 +394,8 @@ export class TikfinitySystem {
       }
     }
 
-    handleTikTokFollow(followData) {
-      this.log(`TikTok Follow: ${followData.nickname} (${followData.uniqueId}) followed`);
+    handleTikfinityFollow(followData) {
+      this.log(`Tikfinity Follow: ${followData.nickname} (${followData.uniqueId}) followed`);
       this.emit('follow', followData);
 
       this.setText('lastFollowerName', followData.uniqueId);
@@ -411,7 +411,7 @@ export class TikfinitySystem {
       }
     }
 
-    handleTikTokLike(likeData) {
+    handleTikfinityLike(likeData) {
       const userId = likeData.userId;
       const likeCount = parseInt(likeData.likeCount);
 
@@ -434,7 +434,7 @@ export class TikfinitySystem {
         this.setHtml('lastLikerImage', `<img src="${likeData.profilePictureUrl}" alt="${likeData.nickname}" class="profile-img">`);
       }
 
-      this.log(`TikTok Like: ${likeData.nickname} (${likeData.uniqueId}) sent ${likeCount} likes, total: ${newTotal}`);
+      this.log(`Tikfinity Like: ${likeData.nickname} (${likeData.uniqueId}) sent ${likeCount} likes, total: ${newTotal}`);
       this.log(`Like mappings: ${JSON.stringify(this.likeMappings)}`);
 
       const userTriggeredGoals = this.triggeredLikeGoals.get(userId);

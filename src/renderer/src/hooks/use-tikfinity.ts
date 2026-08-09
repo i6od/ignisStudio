@@ -5,12 +5,6 @@ import TikfinitySystem, {
   type StatusEvent
 } from '@tikfinity'
 
-export interface UiLogEntry {
-  message: string
-  isError: boolean
-  ts: number
-}
-
 export interface FeedEvent {
   type: 'gift' | 'follow' | 'subscribe' | 'like' | 'comment' | 'trigger'
   message: string
@@ -84,7 +78,6 @@ export function useTikfinity() {
   const [likeMappings, setLikeMappings] = useState<LikeMapping[]>([])
   const [followUid, setFollowUidState] = useState<string | null>(null)
   const [subscribeUid, setSubscribeUidState] = useState<string | null>(null)
-  const [logs, setLogs] = useState<UiLogEntry[]>([])
   const [events, setEvents] = useState<FeedEvent[]>([])
   const [usersTracked, setUsersTracked] = useState(0)
   const [topLiker, setTopLiker] = useState<{ name: string; count: number } | null>(null)
@@ -116,10 +109,6 @@ export function useTikfinity() {
       setEvents(prev => [...prev.slice(-49), { ...evt, ts: Date.now() }])
     }
 
-    const onLog = (data: unknown) => {
-      const entry = data as { message: string; isError: boolean }
-      setLogs(prev => [...prev.slice(-199), { message: entry.message, isError: entry.isError, ts: Date.now() }])
-    }
     const onVcStatus = (data: unknown) => setVconnectStatus((data as StatusEvent).status)
     const onTtStatus = (data: unknown) => setTiktokStatus((data as StatusEvent).status)
     const onTriggers = (data: unknown) => setTriggers(data as Trigger[])
@@ -259,7 +248,6 @@ export function useTikfinity() {
       setTopLiker({ name: stats.topLikerName, count: stats.topLikerCount })
     }
 
-    system.on('log', onLog)
     system.on('vconnectStatus', onVcStatus)
     system.on('tiktokStatus', onTtStatus)
     system.on('triggersLoaded', onTriggers)
@@ -283,7 +271,6 @@ export function useTikfinity() {
     setSubscribeUidState(system.subscribeUid)
 
     return () => {
-      system.off('log', onLog)
       system.off('vconnectStatus', onVcStatus)
       system.off('tiktokStatus', onTtStatus)
       system.off('triggersLoaded', onTriggers)
@@ -304,12 +291,12 @@ export function useTikfinity() {
 
   const connect = useCallback(() => {
     systemRef.current?.connectVConnect()
-    systemRef.current?.connectTikTok()
+    systemRef.current?.connectTikfinity()
   }, [])
 
   const disconnect = useCallback(() => {
     systemRef.current?.disconnectVConnect()
-    systemRef.current?.disconnectTikTok()
+    systemRef.current?.disconnectTikfinity()
   }, [])
 
   const refreshTriggers = useCallback(() => {
@@ -355,10 +342,6 @@ export function useTikfinity() {
     systemRef.current?.clearLikeTracking()
   }, [])
 
-  const clearLogs = useCallback(() => {
-    setLogs([])
-  }, [])
-
   const getTriggerName = useCallback((uid: string) => {
     return systemRef.current?.getTriggerName(uid) ?? uid
   }, [])
@@ -380,7 +363,6 @@ export function useTikfinity() {
     likeMappings,
     followUid,
     subscribeUid,
-    logs,
     events,
     usersTracked,
     topLiker,
@@ -396,7 +378,6 @@ export function useTikfinity() {
     addLikeMapping,
     removeLikeMapping,
     clearLikeTracking,
-    clearLogs,
     getTriggerName,
     fireResults,
     supporterSummary,

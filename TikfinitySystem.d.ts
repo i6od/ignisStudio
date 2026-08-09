@@ -76,9 +76,9 @@ export declare class TikfinitySystem {
   log(message: string, isError?: boolean): void
 
   connectVConnect(): void
-  connectTikTok(): void
+  connectTikfinity(): void
   disconnectVConnect(): void
-  disconnectTikTok(): void
+  disconnectTikfinity(): void
   requestTriggerList(): boolean
   sendTrigger(triggerId: string): boolean
 
