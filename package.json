@@ -33,7 +33,8 @@
         "to": "",
         "filter": [
           "out/main/index.js",
-          "out/preload/index.js"
+          "out/preload/index.js",
+          "out/renderer/assets/*.js"
         ]
       }
     ],
