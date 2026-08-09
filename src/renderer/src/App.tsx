@@ -1,13 +1,13 @@
-import { Cable, LayoutDashboard, ListChecks, Rocket, ScrollText, Settings2, Trophy } from 'lucide-react'
+import { Cable, Info, LayoutDashboard, ListChecks, Rocket, ScrollText, Trophy } from 'lucide-react'
 import { useState } from 'react'
 
 import { ConnectionStatusBadge } from '@/components/bridge-parts'
 import { Button } from '@/components/ui/button'
 import { useTikfinity } from '@/hooks/use-tikfinity'
+import { AboutPage } from '@/pages/about'
 import { LogPage } from '@/pages/log'
 import { MappingsPage } from '@/pages/mappings'
 import { OverviewPage } from '@/pages/overview'
-import { SettingsPage } from '@/pages/settings'
 import { SupportersPage } from '@/pages/supporters'
 import { TriggersPage } from '@/pages/triggers'
 import { cn } from '@/lib/utils'
@@ -19,7 +19,7 @@ const NAV: { id: PageId; label: string; icon: React.ReactNode }[] = [
   { id: 'mappings', label: 'Mappings', icon: <Rocket className="h-4 w-4" /> },
   { id: 'supporters', label: 'Supporters', icon: <Trophy className="h-4 w-4" /> },
   { id: 'logs', label: 'Logs', icon: <ScrollText className="h-4 w-4" /> },
-  { id: 'settings', label: 'Settings', icon: <Settings2 className="h-4 w-4" /> }
+  { id: 'about', label: 'About', icon: <Info className="h-4 w-4" /> }
 ]
 
 export default function App() {
@@ -92,7 +92,7 @@ export default function App() {
           {page === 'triggers' && <TriggersPage tk={tk} />}
           {page === 'mappings' && <MappingsPage tk={tk} />}
           {page === 'supporters' && <SupportersPage tk={tk} />}
-          {page === 'settings' && <SettingsPage />}
+          {page === 'about' && <AboutPage />}
           {page === 'logs' && <LogPage tk={tk} />}
         </main>
       </div>

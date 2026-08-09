@@ -1,4 +1,4 @@
-import { CheckCircle2, RefreshCcw, Settings2, XCircle } from 'lucide-react'
+import { CheckCircle2, Info, RefreshCcw, XCircle } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import { PageSection } from '@/components/page-section'
@@ -11,7 +11,7 @@ type UpdateState = {
   error?: string
 }
 
-export function SettingsPage() {
+export function AboutPage() {
   const [version, setVersion] = useState('')
   const [state, setState] = useState<UpdateState>({ step: 'idle' })
 
@@ -61,9 +61,9 @@ export function SettingsPage() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       <PageSection
-        icon={<Settings2 className="h-4 w-4" />}
-        title="App Settings"
-        description="About and automatic updates"
+        icon={<Info className="h-4 w-4" />}
+        title="About"
+        description="App version and updates"
       >
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
           <div className="flex flex-wrap items-center gap-3">
@@ -72,8 +72,6 @@ export function SettingsPage() {
               <p className="text-xs text-zinc-500">
                 Version{' '}
                 <span className="font-mono text-zinc-300">{version || '—'}</span>
-                <span className="mx-2 text-zinc-700">·</span>
-                Electron {window.vconnect?.versions.electron ?? '—'}
               </p>
             </div>
             <Button size="sm" onClick={checkNow} disabled={isBusy}>
