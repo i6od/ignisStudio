@@ -1,4 +1,4 @@
-# VConnect Bridge — Deployment Guide
+# Brij Studio — Deployment Guide
 
 Auto-updates via GitHub Releases using `electron-updater`, matching the pipeline in
 `E:\YTStudio\deploy_doc.md`. Flow: obfuscate main/preload bundles → package installers →
@@ -60,9 +60,9 @@ Already set in `package.json` → `build.publish`:
 
 | File | Purpose |
 |------|---------|
-| `VConnect Bridge X.X.X.exe` | Portable (no install needed) |
-| `VConnect Bridge Setup X.X.X.exe` | NSIS installer |
-| `VConnect Bridge Setup X.X.X.exe.blockmap` | Differential update map |
+| `Brij Studio X.X.X.exe` | Portable (no install needed) |
+| `Brij Studio Setup X.X.X.exe` | NSIS installer |
+| `Brij Studio Setup X.X.X.exe.blockmap` | Differential update map |
 | `latest.yml` | Version metadata for auto-updater |
 
 ## Version Bump + Deploy
@@ -77,7 +77,7 @@ npm run electron:deploy
   → npm run build          (electron-vite builds src/ → out/)
   → node obfuscate.js      (obfuscates out/main/index.js + out/preload/index.js → obfuscated/)
   → electron-builder --win --publish always
-      → release/VConnect Bridge Setup X.X.X.exe  (+ portable, blockmap, latest.yml)
+      → release/Brij Studio Setup X.X.X.exe  (+ portable, blockmap, latest.yml)
       → uploads assets to GitHub Releases (draft)
 ```
 

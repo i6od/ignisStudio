@@ -1,7 +1,7 @@
 {
   "name": "vconnect-bridge",
-  "version": "0.2.0",
-  "description": "TikTkinity → VConnect bridge desktop app",
+  "version": "0.3.0",
+  "description": "Tikfinity → VConnect bridge desktop app (Brij Studio)",
   "main": "./out/main/index.js",
   "author": "",
   "license": "MIT",
@@ -18,7 +18,7 @@
   },
   "build": {
     "appId": "com.vconnect.bridge",
-    "productName": "VConnect Bridge",
+    "productName": "Brij Studio",
     "directories": {
       "output": "release"
     },
@@ -58,7 +58,7 @@
         }
       ],
       "signAndEditExecutable": false,
-      "executableName": "VConnect Bridge"
+      "executableName": "Brij Studio"
     },
     "nsis": {
       "oneClick": false,

@@ -91,7 +91,7 @@ function createWindow(): void {
     height: 760,
     show: false,
     autoHideMenuBar: true,
-    title: 'VConnect Bridge',
+    title: 'Brij Studio',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

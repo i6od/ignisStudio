@@ -40,7 +40,7 @@ export default function App() {
             <Cable className="h-4 w-4" />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold leading-tight">VConnect Bridge</p>
+            <p className="truncate text-sm font-semibold leading-tight">Brij Studio</p>
             <p className="text-[10px] text-zinc-500">Tikfinity → VConnect</p>
           </div>
         </div>

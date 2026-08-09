@@ -68,7 +68,7 @@ export function SettingsPage() {
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">VConnect Bridge</p>
+              <p className="text-sm font-medium">Brij Studio</p>
               <p className="text-xs text-zinc-500">
                 Version{' '}
                 <span className="font-mono text-zinc-300">{version || '—'}</span>
