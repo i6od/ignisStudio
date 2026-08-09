@@ -88,11 +88,6 @@ export function SettingsPage() {
 
           <UpdateStatus state={state} />
         </div>
-
-        <p className="mt-3 text-xs text-zinc-600">
-          Updates are published to GitHub Releases. The app checks automatically 5 seconds after
-          launch and hourly; a downloaded update installs automatically after 3 seconds.
-        </p>
       </PageSection>
     </div>
   )
