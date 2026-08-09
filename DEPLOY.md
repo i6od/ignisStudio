@@ -26,7 +26,7 @@ npm run electron:deploy
 ### 1. Create the GitHub repository
 
 1. Go to https://github.com/new
-2. Name: `ignisstudio`
+2. Name: `ignisStudio`
 3. Add a README.md
 4. Create repo
 
@@ -52,7 +52,7 @@ Already set in `package.json` → `build.publish`:
 "publish": {
   "provider": "github",
   "owner": "i6od",
-  "repo": "ignisstudio"
+  "repo": "ignisStudio"
 }
 ```
 
