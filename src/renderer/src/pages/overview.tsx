@@ -94,13 +94,13 @@ export function OverviewPage({ tk, onNavigate }: { tk: Tk; onNavigate: (p: PageI
           icon={<Heart className="h-4 w-4" />}
           label="Like goals"
           value={tk.likeMappings.length}
-          onClick={() => onNavigate('likes')}
+          onClick={() => onNavigate('mappings')}
         />
         <StatCard
           icon={<Activity className="h-4 w-4" />}
           label="Tracked users"
           value={tk.usersTracked}
-          onClick={() => onNavigate('likes')}
+          onClick={() => onNavigate('mappings')}
         />
       </div>
     </div>

@@ -1,10 +1,9 @@
-import { Cable, Heart, LayoutDashboard, ListChecks, Rocket, ScrollText, Settings2, Trophy } from 'lucide-react'
+import { Cable, LayoutDashboard, ListChecks, Rocket, ScrollText, Settings2, Trophy } from 'lucide-react'
 import { useState } from 'react'
 
 import { ConnectionStatusBadge } from '@/components/bridge-parts'
 import { Button } from '@/components/ui/button'
 import { useTikfinity } from '@/hooks/use-tikfinity'
-import { LikeGoalsPage } from '@/pages/like-goals'
 import { LogPage } from '@/pages/log'
 import { MappingsPage } from '@/pages/mappings'
 import { OverviewPage } from '@/pages/overview'
@@ -18,7 +17,6 @@ const NAV: { id: PageId; label: string; icon: React.ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <LayoutDashboard className="h-4 w-4" /> },
   { id: 'triggers', label: 'Triggers', icon: <ListChecks className="h-4 w-4" /> },
   { id: 'mappings', label: 'Mappings', icon: <Rocket className="h-4 w-4" /> },
-  { id: 'likes', label: 'Like Goals', icon: <Heart className="h-4 w-4" /> },
   { id: 'supporters', label: 'Supporters', icon: <Trophy className="h-4 w-4" /> },
   { id: 'logs', label: 'Logs', icon: <ScrollText className="h-4 w-4" /> },
   { id: 'settings', label: 'Settings', icon: <Settings2 className="h-4 w-4" /> }
@@ -65,7 +63,7 @@ export default function App() {
 
         <div className="mt-auto flex items-center gap-1.5 px-4 py-3 text-[10px] text-zinc-600">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          Local · v0.2
+          Local · v0.4
         </div>
       </aside>
 
@@ -93,7 +91,6 @@ export default function App() {
           {page === 'overview' && <OverviewPage tk={tk} onNavigate={setPage} />}
           {page === 'triggers' && <TriggersPage tk={tk} />}
           {page === 'mappings' && <MappingsPage tk={tk} />}
-          {page === 'likes' && <LikeGoalsPage tk={tk} />}
           {page === 'supporters' && <SupportersPage tk={tk} />}
           {page === 'settings' && <SettingsPage />}
           {page === 'logs' && <LogPage tk={tk} />}
