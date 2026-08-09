@@ -1,0 +1,1 @@
+export type PageId = 'overview' | 'triggers' | 'mappings' | 'likes' | 'logs' | 'supporters' | 'settings'

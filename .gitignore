@@ -1,0 +1,15 @@
+node_modules/
+out/
+release/
+obfuscated/
+dist/
+.env
+.env.*
+*.log
+*.tsbuildinfo
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.hermes/
+tmp/

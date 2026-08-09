@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' ws: wss:">
+  <title>VConnect</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 16px; }
+    .status-box { padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; font-weight: 600; }
+    .status-box .status-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+    .status-indicator.connected { background: #2ecc71; }
+    .status-indicator.connecting { background: #f1c40f; }
+    .status-indicator.disconnected { background: #e74c3c; }
+    button { margin: 4px 0; padding: 6px 10px; }
+    input { padding: 6px; }
+    #log { max-height: 260px; overflow-y: auto; background: #111; color: #ddd; padding: 8px;
+           font-family: monospace; font-size: 12px; border-radius: 6px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>VConnect</h1>
+
+  <div id="vconnect-status" class="status-box">
+    <span class="status-indicator disconnected"></span>
+    <span id="vconnect-status-text">Disconnected</span>
+  </div>
+  <div id="tiktok-status" class="status-box">
+    <span class="status-indicator disconnected"></span>
+    <span id="tiktok-status-text">Disconnected</span>
+  </div>
+
+  <div>
+    <button id="refreshBtn">Refresh Trigger List</button>
+    <button id="connectBtn">Connect</button>
+  </div>
+
+  <label>Trigger UID <input id="triggerUid" size="40" placeholder="a0ce3831-3c3e-4474-b4e4-19ab98dc73dd"></label>
+  <button id="activateBtn">Activate Trigger</button>
+
+  <div id="triggerCount"></div>
+
+  <div id="log"></div>
+
+  <script src="TikfinitySystem.js"></script>
+  <script>
+    window.Tikfinity = new TikfinitySystem({
+      vconnectUrl: 'ws://localhost:42069/websocket',
+      tiktokUrl: 'ws://192.168.12.22:21213'
+    });
+
+    const system = window.Tikfinity;
+
+    system.on('vconnectStatus', () => {});
+    system.on('tiktokStatus', () => {});
+
+    system.on('triggersLoaded', (triggers) => {
+      document.getElementById('triggerCount').textContent = `${triggers.length} triggers loaded`;
+    });
+
+    document.getElementById('connectBtn').addEventListener('click', () => {
+      system.connectVConnect();
+      system.connectTikTok();
+    });
+
+    document.getElementById('refreshBtn').addEventListener('click', () => system.requestTriggerList());
+
+document.getElementById('activateBtn').addEventListener('click', () => {
+      const uid = document.getElementById('activateUid').value.trim();
+      if (!uid) return;
+      system.sendTrigger(uid);
+    });
+
+    const el = document.createElement('p');
+    el.textContent = 'Electron: ' + window.process.versions.electron +
+      ' | Chrome: ' + window.process.versions.chrome +
+      ' | Node: ' + window.process.versions.node;
+    document.body.appendChild(el);
+  </script>
+</body>
+</html>

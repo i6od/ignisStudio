@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VConnect WS Monitor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    background: #0d1117; color: #e6edf3; font-size: 13px;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    background: #161b22; border-bottom: 1px solid #30363d; flex-wrap: wrap;
+  }
+  header h1 { font-size: 14px; font-weight: 600; color: #58a6ff; margin-right: 8px; white-space: nowrap; }
+  input[type="text"] {
+    background: #0d1117; border: 1px solid #30363d; color: #e6edf3;
+    padding: 5px 8px; border-radius: 6px; width: 240px; font-family: inherit;
+  }
+  input[type="text"]:focus { outline: 1px solid #58a6ff; border-color: #58a6ff; }
+  button {
+    background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+    padding: 5px 12px; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 12px;
+  }
+  button:hover { background: #30363d; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button.primary:hover { background: #388bfd; }
+  #status { display: flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; white-space: nowrap; }
+  #dot { width: 10px; height: 10px; border-radius: 50%; background: #484f58; }
+  #dot.on { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+  #dot.err { background: #f85149; box-shadow: 0 0 6px #f85149; }
+  #stats { display: flex; gap: 14px; color: #8b949e; font-size: 12px; }
+  #stats b { color: #e6edf3; font-weight: 600; }
+
+  #toolbar {
+    display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+    background: #0d1117; border-bottom: 1px solid #21262d; flex-wrap: wrap;
+  }
+  #toolbar .filters { display: flex; gap: 6px; }
+  .filter { padding: 3px 10px; border-radius: 20px; font-size: 11px; border: 1px solid #30363d; background: transparent; color: #8b949e; }
+  .filter.active { background: #1f6feb22; border-color: #1f6feb; color: #58a6ff; }
+  #toolbar .spacer { flex: 1; }
+  #autoscroll { display: flex; align-items: center; gap: 5px; color: #8b949e; font-size: 12px; cursor: pointer; }
+
+  #main { display: flex; flex: 1; min-height: 0; }
+  #log { flex: 1; overflow-y: auto; padding: 8px 12px; background: #0d1117; }
+  .entry { border-left: 2px solid #30363d; padding: 3px 0 3px 10px; margin-bottom: 2px; }
+  .entry .head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .time { color: #484f58; font-size: 11px; white-space: nowrap; }
+  .badge { font-size: 10px; padding: 1px 7px; border-radius: 10px; white-space: nowrap; font-weight: 600; }
+  .b-event { background: #1f6feb33; color: #58a6ff; }
+  .b-pubsub { background: #a371f733; color: #d2a8ff; }
+  .b-response { background: #3fb95033; color: #3fb950; }
+  .b-info { background: #484f5833; color: #8b949e; }
+  .entry .mt { font-weight: 600; color: #e6edf3; }
+  .entry pre {
+    margin: 2px 0 0 0; color: #8b949e; font-size: 12px; white-space: pre-wrap; word-break: break-all;
+    max-height: 160px; overflow-y: auto; background: #161b22; border-radius: 4px; padding: 4px 8px;
+  }
+  #empty-msg { color: #484f58; padding: 20px; text-align: center; }
+
+  #side {
+    width: 340px; border-left: 1px solid #21262d; background: #161b22;
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  #side h2 { font-size: 12px; color: #8b949e; padding: 10px 12px 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  #send { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+  #send textarea {
+    flex: 1; min-height: 90px; background: #0d1117; border: 1px solid #30363d; color: #e6edf3;
+    border-radius: 6px; padding: 8px; font-family: inherit; font-size: 12px; resize: none;
+  }
+  #send textarea:focus { outline: 1px solid #58a6ff; }
+  #quick { display: flex; gap: 6px; flex-wrap: wrap; }
+  #quick button { font-size: 11px; padding: 3px 8px; }
+  #send .row { display: flex; gap: 6px; }
+  #send .row button { flex: 1; }
+  #sendoutput { color: #8b949e; font-size: 11px; }
+  #sendoutput.ok { color: #3fb950; }
+  #sendoutput.err { color: #f85149; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>VConnect WS Monitor</h1>
+  <input type="text" id="url" value="ws://localhost:39542" spellcheck="false" />
+  <button id="connect" class="primary">Connect</button>
+  <div id="status"><span id="dot"></span><span id="statusText">disconnected</span></div>
+</header>
+
+<div id="toolbar">
+  <div class="filters">
+    <button class="filter active" data-f="all">All</button>
+    <button class="filter" data-f="event">Events</button>
+    <button class="filter" data-f="pubsub">Pub/Sub</button>
+    <button class="filter" data-f="response">Replies</button>
+    <button class="filter" data-f="info">Other</button>
+  </div>
+  <div id="stats">
+    <span>events <b id="cEvent">0</b></span>
+    <span>pubsub <b id="cPub">0</b></span>
+    <span>replies <b id="cResp">0</b></span>
+    <span>total <b id="cTotal">0</b></span>
+  </div>
+  <div class="spacer"></div>
+  <label id="autoscroll"><input type="checkbox" checked /> autoscroll</label>
+  <button id="clearlog">Clear</button>
+</div>
+
+<div id="main">
+  <div id="log">
+    <div id="empty-msg">Hit Connect — every incoming message lands here.</div>
+  </div>
+  <div id="side">
+    <h2>Send message (fresh socket)</h2>
+    <div id="send">
+      <div id="quick">
+        <button data-q="list">TriggerList</button>
+        <button data-q="fire">Fire trigger</button>
+        <button data-q="pub">websocket_node</button>
+      </div>
+      <textarea id="payload" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="sendbtn" class="primary">Send</button>
+        <button id="sendself">self-send</button>
+      </div>
+      <div id="sendoutput">Tip: pick a template, tweak it, then Send. "self-send" fires your payload through the server and shows any response/echo in the log.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const urlInput = $('url'), connectBtn = $('connect'), dot = $('dot'), statusText = $('statusText');
+const logEl = $('log'), payload = $('payload'), sendBtn = $('sendbtn'), sendSelfBtn = $('sendself'), sendOutput = $('sendoutput');
+const autoScrollBox = $('autoscroll').querySelector('input');
+
+const counts = { event: 0, pubsub: 0, response: 0, info: 0 };
+let activeFilter = 'all';
+let autoScroll = true;
+let ws = null;
+let sendSock = null;
+
+function now() {
+  const d = new Date();
+  return d.toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+function classify(mt) {
+  if (typeof mt !== 'string') return 'info';
+  if (mt === 'websocket_node') return 'pubsub';
+  if (mt.endsWith('Response')) return 'response';
+  if (mt.endsWith('Event')) return 'event';
+  return 'info';
+}
+function kindVisible(kind) {
+  if (activeFilter === 'all') return true;
+  return activeFilter === kind;
+}
+function appendRow(badgeCls, kind, mtText, body) {
+  const head = document.createElement('div');
+  head.className = 'head';
+  head.innerHTML = '<span class="time"></span><span class="badge ' + badgeCls + '">' + kind + '</span><span class="mt"></span>';
+  head.querySelector('.time').textContent = now();
+  if (mtText) head.querySelector('.mt').textContent = mtText;
+  const pre = document.createElement('pre');
+  pre.textContent = body;
+  const entry = document.createElement('div');
+  entry.className = 'entry';
+  entry.dataset.kind = kind;
+  entry.appendChild(head);
+  entry.appendChild(pre);
+  if (!kindVisible(kind)) entry.style.display = 'none';
+  logEl.appendChild(entry);
+  counts[kind] = (counts[kind] || 0) + 1;
+    updStats();
+  if (autoScroll) logEl.scrollTop = logEl.scrollHeight;
+  return entry;
+}
+function updStats() {
+  $('cEvent').textContent = counts.event || 0;
+  $('cPub').textContent = counts.pubsub || 0;
+  $('cResp').textContent = counts.response || 0;
+  $('cTotal').textContent = counts.event + counts.pubsub + counts.response + counts.info;
+}
+function logInfo(msg) { appendRow('b-info', 'info', '', msg); }
+function handleRaw(raw) {
+  raw = String(raw);
+  if (!raw.length) { logInfo('(empty frame — server keepalive)'); return; }
+  let obj;
+  try { obj = JSON.parse(raw); } catch {
+    logInfo('(non-JSON frame: ' + raw.slice(0, 120) + ')');
+    return;
+  }
+  const mt = obj && obj.messageType;
+  const kind = classify(mt);
+  const cls = kind === 'event' ? 'b-event' : kind === 'pubsub' ? 'b-pubsub' : kind === 'response' ? 'b-response' : 'b-info';
+  appendRow(cls, kind, mt + (obj.requestID ? ' [' + obj.requestID + ']' : ''), JSON.stringify(obj.data ?? {}, null, 2));
+}
+
+// ---- toolbar ----
+document.querySelectorAll('.filter').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter').forEach(b => b.classList.toggle('active', b === btn));
+    activeFilter = btn.dataset.f;
+    for (const e of logEl.querySelectorAll('.entry')) {
+      e.style.display = kindVisible(e.dataset.kind) ? '' : 'none';
+    }
+  });
+});
+autoScrollBox.addEventListener('change', e => { autoScroll = e.target.checked; });
+$('clearlog').addEventListener('click', () => {
+  logEl.replaceChildren();
+  const d = document.createElement('div');
+  d.id = 'empty-msg';
+  d.textContent = 'Log cleared.';
+  logEl.appendChild(d);
+  for (const k in counts) counts[k] = 0;
+  updStats();
+});
+
+// ---- connection ----
+function wsUrl() {
+  const v = urlInput.value.trim();
+  return v || 'ws://localhost:39542';
+}
+function setStatus(cls, text) { dot.className = cls; statusText.textContent = text; }
+function connect() {
+  const sock = new WebSocket(wsUrl());
+  ws = sock;
+  setStatus('', 'connecting…');
+  sock.onopen = () => { setStatus('on', 'open'); logInfo('connected to ' + wsUrl()); };
+  sock.onmessage = (ev) => {
+    let raw = ev.data;
+    if (raw instanceof Blob) { raw.text().then(handleRaw); return; }
+    if (raw instanceof ArrayBuffer) raw = new TextDecoder().decode(raw);
+    handleRaw(raw);
+  };
+  sock.onerror = () => { setStatus('err', 'error'); logInfo('WebSocket error — is VConnect running?'); };
+  sock.onclose = () => { if (ws === sock) { setStatus('', 'closed'); logInfo('disconnected'); ws = null; } };
+}
+connectBtn.addEventListener('click', () => {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    ws.close();
+    return;
+  }
+  connect();
+});
+
+// ---- presets + send ----
+function envelope(mt, data) {
+  return JSON.stringify({
+    apiName: 'VConnectPublicApi',
+    apiVersion: '1.0',
+    requestID: 'ui-' + Math.random().toString(36).slice(2, 8),
+    messageType: mt,
+    timestamp: new Date().toISOString(),
+    data,
+  }, null, 2);
+}
+document.querySelectorAll('#quick button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const q = btn.dataset.q;
+    if (q === 'list') payload.value = envelope('TriggerListRequest', {});
+    else if (q === 'pub') payload.value = envelope('websocket_node', { channel: 'test', data: ['hi', 42, true] });
+    else if (q === 'fire') fireFirstTrigger();
+  });
+});
+function fireFirstTrigger() {
+  const s = new WebSocket(wsUrl());
+  let done = false;
+  const timer = setTimeout(() => { if (!done) { s.close(); sendOutput.className = 'err'; sendOutput.textContent = 'fire: timed out'; } }, 6000);
+  s.onopen = () => s.send(JSON.stringify({ apiName: 'VConnectPublicApi', apiVersion: '1.0', requestID: 'ui-list', messageType: 'TriggerListRequest', timestamp: new Date().toISOString(), data: {} }));
+  s.onmessage = (ev) => {
+    let raw = ev.data;
+    if (raw instanceof ArrayBuffer) raw = new TextDecoder().decode(raw);
+    if (typeof raw !== 'string' || raw.length === 0) return;
+    let m; try { m = JSON.parse(raw); } catch { return; }
+    if (m.messageType !== 'TriggerListResponse' || done) return;
+    done = true;
+    clearTimeout(timer);
+    const trigs = m.data.triggers || [];
+    if (!trigs.length) { sendOutput.textContent = 'no triggers loaded'; s.close(); return; }
+    const t = trigs[0];
+    s.close();
+    sendOutput.className = 'ok';
+    sendOutput.textContent = 'firing ' + t.name + ' …';
+    const f = new WebSocket(wsUrl());
+    f.onopen = () => f.send(JSON.stringify({ apiName: 'VConnectPublicApi', apiVersion: '1.0', requestID: 'ui-fire', messageType: 'TriggerActivateRequest', timestamp: new Date().toISOString(), data: { uid: t.uid, name: t.name } }));
+    setTimeout(() => { try { f.close(); } catch {} }, 2500);
+  };
+  s.onerror = () => { clearTimeout(timer); s.close(); };
+}
+function sendPayload(raw) {
+  const text = raw.trim ? raw.trim() : raw;
+  if (!text) return;
+  let obj;
+  try { obj = JSON.parse(text); } catch (e) { sendOutput.className = 'err'; sendOutput.textContent = 'invalid JSON: ' + e.message; return; }
+  sendOutput.className = '';
+  sendOutput.textContent = 'sending ' + obj.messageType + ' …';
+  if (sendSock) try { sendSock.close(); } catch {}
+  const s = new WebSocket(wsUrl());
+  sendSock = s;
+  s.onopen = () => {
+    s.send(text);
+    sendOutput.className = 'ok';
+    sendOutput.textContent = 'sent ' + obj.messageType + ' at ' + new Date().toISOString();
+    setTimeout(() => { try { s.close(); } catch {} }, 2000);
+  };
+  s.onerror = () => { sendOutput.className = 'err'; sendOutput.textContent = 'send socket error — VConnect running?'; };
+}
+sendBtn.addEventListener('click', () => sendPayload(payload.value));
+sendSelfBtn.addEventListener('click', () => {
+  const raw = payload.value.trim();
+  if (!raw) return;
+  logInfo('self-send >>> ' + raw);
+  sendPayload(raw);
+});
+</script>
+</body>
+</html>
