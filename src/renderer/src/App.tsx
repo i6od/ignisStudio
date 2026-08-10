@@ -32,14 +32,14 @@ export default function App() {
       {/* Sidebar */}
       <aside className="flex w-52 shrink-0 flex-col border-r border-zinc-800/80 bg-zinc-900/40">
         <div className="flex items-center gap-2.5 px-4 py-4">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-fuchsia-600">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500">
             <Cable className="h-4 w-4" />
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold leading-tight">Brij Studio</p>
             <p className="text-[10px] text-zinc-500">Tikfinity → VConnect</p>
           </div>
-        </div>
+          </div>
 
         <nav className="flex flex-col gap-0.5 px-2">
           {NAV.map(item => (
@@ -62,7 +62,7 @@ export default function App() {
         <div className="mt-auto flex items-center gap-1.5 px-4 py-3 text-[10px] text-zinc-600">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
           Local · v0.4
-        </div>
+          </div>
       </aside>
 
       {/* Main column */}
@@ -92,7 +92,7 @@ export default function App() {
           {page === 'supporters' && <SupportersPage tk={tk} />}
           {page === 'about' && <AboutPage />}
         </main>
-      </div>
-    </div>
+          </div>
+          </div>
   )
 }
