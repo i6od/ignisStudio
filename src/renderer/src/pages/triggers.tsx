@@ -17,27 +17,45 @@ import type { useTikfinity } from '@/hooks/use-tikfinity'
 import { cn } from '@/lib/utils'
 
 type Tk = ReturnType<typeof useTikfinity>
+type ApiTab = 'vconnect' | 'tits'
 
 export function TriggersPage({ tk }: { tk: Tk }) {
+  const [tab, setTab] = useState<ApiTab>('vconnect')
   const [filter, setFilter] = useState('')
 
-  const triggers = tk.triggers.filter(t =>
-    filter.trim() === '' || t.name.toLowerCase().includes(filter.trim().toLowerCase())
+  const isVconnect = tab === 'vconnect'
+  const allTriggers = isVconnect ? tk.triggers : tk.titsTriggers
+  const fireResults = isVconnect ? tk.fireResults : tk.fireResultsTits
+
+  const triggers = allTriggers.filter(
+    t => filter.trim() === '' || t.name.toLowerCase().includes(filter.trim().toLowerCase())
   )
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       <PageSection
         icon={<ListChecks className="h-4 w-4" />}
-        title={`Triggers (${tk.triggers.length})`}
-        description="Loaded from VConnect via TriggerListRequest"
+        title={`Triggers (${allTriggers.length})`}
+        description={
+          isVconnect
+            ? 'Loaded from VConnect via TriggerListRequest'
+            : 'Loaded from TITS via TITSTriggerListRequest'
+        }
         actions={
-          <Button variant="outline" size="sm" onClick={tk.refreshTriggers}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => (isVconnect ? tk.refreshTriggers() : tk.refreshTitsTriggers())}
+          >
             <RefreshCcw className="h-4 w-4" />
             Refresh
           </Button>
         }
       >
+        <div className="mb-2 flex gap-1 rounded-md border border-zinc-800 bg-zinc-900/60 p-0.5">
+          <TabButton active={isVconnect} onClick={() => setTab('vconnect')} label="VConnect" count={tk.triggers.length} />
+          <TabButton active={!isVconnect} onClick={() => setTab('tits')} label="TITS" count={tk.titsTriggers.length} />
+        </div>
         <Input
           value={filter}
           onChange={e => setFilter(e.target.value)}
@@ -57,14 +75,14 @@ export function TriggersPage({ tk }: { tk: Tk }) {
               {triggers.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={3} className="py-6 text-center text-sm text-zinc-500">
-                    {tk.triggers.length === 0
-                      ? 'No triggers loaded — connect to VConnect and refresh.'
+                    {allTriggers.length === 0
+                      ? `No triggers loaded — connect to ${isVconnect ? 'VConnect' : 'TITS'} and refresh.`
                       : 'No triggers match your filter.'}
                   </TableCell>
                 </TableRow>
               )}
               {triggers.map(t => {
-                const result = tk.fireResults[t.uid]
+                const result = fireResults[t.uid]
                 return (
                   <TableRow key={t.uid} className={cn(result?.status === 'error' && 'bg-red-500/5')}>
                     <TableCell>
@@ -84,7 +102,9 @@ export function TriggersPage({ tk }: { tk: Tk }) {
                           variant="ghost"
                           size="sm"
                           className="h-6 px-2"
-                          onClick={() => tk.activateTrigger(t.uid)}
+                          onClick={() =>
+                            isVconnect ? tk.activateTrigger(t.uid) : tk.activateTitsTrigger(t.uid)
+                          }
                           title={`Fire ${t.name}`}
                           disabled={result?.status === 'pending'}
                         >
@@ -104,6 +124,31 @@ export function TriggersPage({ tk }: { tk: Tk }) {
         </div>
       </PageSection>
     </div>
+  )
+}
+
+function TabButton({
+  active,
+  onClick,
+  label,
+  count
+}: {
+  active: boolean
+  onClick: () => void
+  label: string
+  count: number
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex flex-1 items-center justify-center gap-1.5 rounded-[5px] px-3 py-1 text-xs font-medium transition-colors',
+        active ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'
+      )}
+    >
+      {label}
+      <span className="text-[10px] text-zinc-500">{count}</span>
+    </button>
   )
 }
 

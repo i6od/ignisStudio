@@ -1,13 +1,14 @@
-import { Cable, Info, LayoutDashboard, ListChecks, Rocket, Trophy } from 'lucide-react'
+import { Cable, Info, LayoutDashboard, ListChecks, Rocket, Sparkles, Trophy } from 'lucide-react'
 import { useState } from 'react'
 
-import { ConnectionStatusBadge } from '@/components/bridge-parts'
+import { ConnectionStatusBadge, EnabledToggle } from '@/components/bridge-parts'
 import { Button } from '@/components/ui/button'
 import { useTikfinity } from '@/hooks/use-tikfinity'
 import { AboutPage } from '@/pages/about'
 import { MappingsPage } from '@/pages/mappings'
 import { OverviewPage } from '@/pages/overview'
 import { SupportersPage } from '@/pages/supporters'
+import { TitsMappingsPage } from '@/pages/tits-mappings'
 import { TriggersPage } from '@/pages/triggers'
 import { cn } from '@/lib/utils'
 import type { PageId } from '@/lib/pages'
@@ -15,7 +16,8 @@ import type { PageId } from '@/lib/pages'
 const NAV: { id: PageId; label: string; icon: React.ReactNode }[] = [
   { id: 'overview', label: 'Overview', icon: <LayoutDashboard className="h-4 w-4" /> },
   { id: 'triggers', label: 'Triggers', icon: <ListChecks className="h-4 w-4" /> },
-  { id: 'mappings', label: 'Mappings', icon: <Rocket className="h-4 w-4" /> },
+  { id: 'vconnect-mappings', label: 'VConnect Maps', icon: <Rocket className="h-4 w-4" /> },
+  { id: 'tits-mappings', label: 'TITS Maps', icon: <Sparkles className="h-4 w-4" /> },
   { id: 'supporters', label: 'Supporters', icon: <Trophy className="h-4 w-4" /> },
   { id: 'about', label: 'About', icon: <Info className="h-4 w-4" /> }
 ]
@@ -25,7 +27,9 @@ export default function App() {
   const [page, setPage] = useState<PageId>('overview')
 
   const vcConnected = tk.vconnectStatus === 'Connected'
+  const titsConnected = tk.titsStatus === 'Connected'
   const ttConnected = tk.tiktokStatus === 'Connected'
+  const anyConnected = vcConnected || titsConnected || ttConnected
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
@@ -37,9 +41,9 @@ export default function App() {
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold leading-tight">Brij Studio</p>
-            <p className="text-[10px] text-zinc-500">Tikfinity → VConnect</p>
+            <p className="text-[10px] text-zinc-500">Tikfinity → VConnect / TITS</p>
           </div>
-          </div>
+        </div>
 
         <nav className="flex flex-col gap-0.5 px-2">
           {NAV.map(item => (
@@ -62,25 +66,34 @@ export default function App() {
         <div className="mt-auto flex items-center gap-1.5 px-4 py-3 text-[10px] text-zinc-600">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
           Local · v0.4
-          </div>
+        </div>
       </aside>
 
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800/80 bg-zinc-900/40 px-4">
           <p className="text-xs font-medium text-zinc-500">
-            {vcConnected || ttConnected ? 'Bridge active' : 'Bridge idle'}
+            {anyConnected ? 'Bridge active' : 'Bridge idle'}
           </p>
           <div className="flex items-center gap-2">
-            <ConnectionStatusBadge status={tk.vconnectStatus} label="VConnect" />
+            <EnabledToggle label="VConnect" enabled={tk.vconnectEnabled} onToggle={tk.setVconnectEnabled} />
+            <EnabledToggle label="TITS" enabled={tk.titsEnabled} onToggle={tk.setTitsEnabled} />
+            <ConnectionStatusBadge
+              status={tk.vconnectEnabled ? tk.vconnectStatus : 'Disabled'}
+              label="VConnect"
+            />
+            <ConnectionStatusBadge
+              status={tk.titsEnabled ? tk.titsStatus : 'Disabled'}
+              label="TITS"
+            />
             <ConnectionStatusBadge status={tk.tiktokStatus} label="Tikfinity" />
             <Button
               size="sm"
               variant="outline"
               className="ml-1 h-7"
-              onClick={() => (vcConnected || ttConnected ? tk.disconnect() : tk.connect())}
+              onClick={() => (anyConnected ? tk.disconnect() : tk.connect())}
             >
-              {vcConnected || ttConnected ? 'Disconnect' : 'Connect'}
+              {anyConnected ? 'Disconnect' : 'Connect'}
             </Button>
           </div>
         </header>
@@ -88,11 +101,12 @@ export default function App() {
         <main className="min-h-0 flex-1 overflow-y-auto p-4">
           {page === 'overview' && <OverviewPage tk={tk} onNavigate={setPage} />}
           {page === 'triggers' && <TriggersPage tk={tk} />}
-          {page === 'mappings' && <MappingsPage tk={tk} />}
+          {page === 'vconnect-mappings' && <MappingsPage tk={tk} />}
+          {page === 'tits-mappings' && <TitsMappingsPage tk={tk} />}
           {page === 'supporters' && <SupportersPage tk={tk} />}
           {page === 'about' && <AboutPage />}
         </main>
-          </div>
-          </div>
+      </div>
+    </div>
   )
 }

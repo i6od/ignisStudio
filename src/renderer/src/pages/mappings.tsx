@@ -21,9 +21,13 @@ export function MappingsPage({ tk }: { tk: Tk }) {
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
+      <p className="text-xs text-zinc-500">
+        Mappings below fire <span className="font-semibold text-zinc-300">VConnect</span> triggers
+        from Tikfinity events.
+      </p>
       <PageSection
         icon={<Gift className="h-4 w-4" />}
-        title="Gift → Trigger"
+        title="Gift → VConnect Trigger"
         description="Case-insensitive match on gift name"
       >
         <div className="flex flex-wrap items-center gap-2">

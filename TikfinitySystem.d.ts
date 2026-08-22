@@ -1,5 +1,6 @@
 export interface TikfinityOptions {
   vconnectUrl?: string
+  titsUrl?: string
   tiktokUrl?: string
   storageKey?: string
 }
@@ -59,8 +60,11 @@ export declare class TikfinitySystem {
   constructor(options?: TikfinityOptions)
 
   vconnectUrl: string
+  titsUrl: string
   tiktokUrl: string
   storageKey: string
+  vconnectEnabled: boolean
+  titsEnabled: boolean
   triggers: Trigger[]
   giftMappings: Map<string, string>
   followUid: string | null
@@ -69,6 +73,14 @@ export declare class TikfinitySystem {
   userLikeTotals: Map<string, number>
   userNicknames: Map<string, string>
   triggeredLikeGoals: Map<string, Set<number>>
+  titsTriggers: Trigger[]
+  titsGiftMappings: Map<string, string>
+  titsFollowId: string | null
+  titsSubscribeId: string | null
+  titsLikeMappings: LikeMapping[]
+  titsUserLikeTotals: Map<string, number>
+  titsUserNicknames: Map<string, string>
+  titsTriggeredLikeGoals: Map<string, Set<number>>
 
   on(event: string, handler: (data: unknown) => void): this
   off(event: string, handler: (data: unknown) => void): this
@@ -76,16 +88,35 @@ export declare class TikfinitySystem {
   log(message: string, isError?: boolean): void
 
   connectVConnect(): void
+  connectTits(): void
   connectTikfinity(): void
   disconnectVConnect(): void
+  disconnectTits(): void
   disconnectTikfinity(): void
   requestTriggerList(): boolean
+  requestTitsTriggerList(): boolean
   sendTrigger(triggerId: string): boolean
+  sendTitsTrigger(triggerId: string): boolean
 
   getTriggers(): Trigger[]
   getGiftMappings(): Map<string, string>
   getLikeMappings(): LikeMapping[]
   getTriggerName(uid: string): string
+  getTitsTriggers(): Trigger[]
+  getTitsGiftMappings(): Map<string, string>
+  getTitsLikeMappings(): LikeMapping[]
+  getTitsTriggerName(uid: string): string
+
+  setVconnectEnabled(enabled: boolean): void
+  setTitsEnabled(enabled: boolean): void
+  setTitsFollowId(uid: string | null): void
+  setTitsSubscribeId(uid: string | null): void
+  addTitsGiftMapping(giftName: string, triggerId: string): boolean
+  removeTitsGiftMapping(giftName: string): void
+  addTitsLikeMapping(likeCount: number | string, uid: string): boolean
+  removeTitsLikeMapping(index: number): void
+  clearTitsLikeTracking(): void
+  updateTitsLikeTrackingStats(): void
 
   setFollowUid(uid: string | null): void
   setSubscribeUid(uid: string | null): void

@@ -1,0 +1,273 @@
+import { Gift, Heart, Rocket, Sparkles, Trash2, UserPlus } from 'lucide-react'
+import { useState } from 'react'
+
+import { PageSection } from '@/components/page-section'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { TriggerSelect } from '@/components/trigger-select'
+import type { LikeMapping } from '@tikfinity'
+import type { useTikfinity } from '@/hooks/use-tikfinity'
+
+type Tk = ReturnType<typeof useTikfinity>
+
+export function TitsMappingsPage({ tk }: { tk: Tk }) {
+  const [giftName, setGiftName] = useState('')
+  const [giftId, setGiftId] = useState('')
+  const [likeCount, setLikeCount] = useState('')
+  const [likeId, setLikeId] = useState('')
+
+  const n = parseInt(likeCount, 10)
+
+  return (
+    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+      <p className="text-xs text-zinc-500">
+        Mappings below fire <span className="font-semibold text-zinc-300">T.I.T.S.</span> triggers
+        from Tikfinity events.
+      </p>
+      <PageSection
+        icon={<Gift className="h-4 w-4" />}
+        title="Gift → TITS Trigger"
+        description="Case-insensitive match on gift name"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={giftName}
+            onChange={e => setGiftName(e.target.value)}
+            placeholder="Gift name (e.g. rose)"
+            className="h-8 w-44"
+          />
+          <TriggerSelect
+            triggers={tk.titsTriggers}
+            value={giftId}
+            onChange={setGiftId}
+            placeholder="TITS trigger…"
+            className="h-8 w-44"
+          />
+          <Button
+            size="sm"
+            className="h-8"
+            disabled={!giftName.trim() || !giftId}
+            onClick={() => {
+              tk.addTitsGiftMapping(giftName.trim(), giftId)
+              setGiftName('')
+              setGiftId('')
+            }}
+          >
+            Add
+          </Button>
+        </div>
+
+        <div className="mt-2 max-h-56 overflow-y-auto">
+          <MappingList
+            rows={tk.titsGiftMappings.map(([name, id]) => ({
+              key: name,
+              label: name,
+              trigger: tk.getTitsTriggerName(id),
+              onRemove: () => tk.removeTitsGiftMapping(name)
+            }))}
+            empty="No TITS gift mappings yet"
+          />
+        </div>
+      </PageSection>
+
+      <PageSection
+        icon={<Rocket className="h-4 w-4" />}
+        title="Social events"
+        description="Follow / Subscribe fire one shot each"
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-1.5">
+            <Label className="flex items-center gap-1.5">
+              <UserPlus className="h-3.5 w-3.5 text-emerald-400" /> Follow → TITS Trigger
+            </Label>
+            <TriggerSelect
+              triggers={tk.titsTriggers}
+              value={tk.titsFollowId ?? ''}
+              onChange={v => tk.setTitsFollowId(v || null)}
+              placeholder="None selected"
+            />
+            {tk.titsFollowId && (
+              <ClearButton label="Follow mapping" onClear={() => tk.setTitsFollowId(null)} />
+            )}
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="flex items-center gap-1.5">
+              <Rocket className="h-3.5 w-3.5 text-sky-400" /> Subscribe → TITS Trigger
+            </Label>
+            <TriggerSelect
+              triggers={tk.titsTriggers}
+              value={tk.titsSubscribeId ?? ''}
+              onChange={v => tk.setTitsSubscribeId(v || null)}
+              placeholder="None selected"
+            />
+            {tk.titsSubscribeId && (
+              <ClearButton label="Subscribe mapping" onClear={() => tk.setTitsSubscribeId(null)} />
+            )}
+          </div>
+        </div>
+      </PageSection>
+
+      <PageSection
+        icon={<Heart className="h-4 w-4" />}
+        title={`TITS like goals (${tk.titsLikeMappings.length})`}
+        description="First time a user crosses a like count, fire its TITS trigger"
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-zinc-500 hover:text-red-400"
+            onClick={tk.clearTitsLikeTracking}
+          >
+            <Trash2 className="h-4 w-4" /> Reset tracking
+          </Button>
+        }
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={likeCount}
+            onChange={e => setLikeCount(e.target.value)}
+            placeholder="Likes (e.g. 100)"
+            type="number"
+            min={1}
+            className="h-8 w-28"
+          />
+          <TriggerSelect
+            triggers={tk.titsTriggers}
+            value={likeId}
+            onChange={setLikeId}
+            placeholder="TITS trigger…"
+            className="h-8 w-44"
+          />
+          <Button
+            size="sm"
+            className="h-8"
+            disabled={isNaN(n) || n <= 0 || !likeId}
+            onClick={() => {
+              tk.addTitsLikeMapping(n, likeId)
+              setLikeCount('')
+              setLikeId('')
+            }}
+          >
+            Add goal
+          </Button>
+        </div>
+
+        <div className="mt-2 max-h-56 overflow-y-auto">
+          <GoalTable
+            mappings={tk.titsLikeMappings}
+            triggerName={tk.getTitsTriggerName}
+            onRemove={i => tk.removeTitsLikeMapping(i)}
+          />
+        </div>
+        <div className="mt-2 flex items-center gap-4 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-xs text-zinc-400">
+          <span className="inline-flex items-center gap-1.5">
+            <UserPlus className="h-3.5 w-3.5 text-emerald-400" /> Users tracked: {tk.titsUsersTracked}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Heart className="h-3.5 w-3.5 text-pink-400" /> Top liker:{' '}
+            {tk.titsTopLiker ? `${tk.titsTopLiker.name} (${tk.titsTopLiker.count})` : '—'}
+          </span>
+        </div>
+      </PageSection>
+
+      {!tk.titsEnabled && (
+        <p className="flex items-center gap-1.5 text-xs text-amber-400/80">
+          <Sparkles className="h-3.5 w-3.5" />
+          TITS API is currently disabled — mappings won&apos;t fire until you enable it (Overview →
+          Connections).
+        </p>
+      )}
+    </div>
+  )
+}
+
+function ClearButton({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-6 justify-start px-1.5 text-xs text-zinc-500 hover:text-red-400"
+      onClick={onClear}
+    >
+      <Trash2 className="h-3.5 w-3.5" /> Clear {label}
+    </Button>
+  )
+}
+
+function MappingList({
+  rows,
+  empty
+}: {
+  rows: { key: string; label: string; trigger: string; onRemove: () => void }[]
+  empty: string
+}) {
+  if (rows.length === 0) return <p className="py-1 text-sm text-zinc-500">{empty}</p>
+  return (
+    <div className="overflow-hidden rounded-md border border-zinc-800">
+      <table className="w-full text-sm">
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.key} className="border-b border-zinc-800/60 last:border-0">
+              <td className="px-2.5 py-1.5 font-medium">{r.label}</td>
+              <td className="px-2.5 py-1.5 text-zinc-400">{r.trigger}</td>
+              <td className="w-10 px-2 py-1.5 text-right">
+                <button
+                  className="text-zinc-600 transition-colors hover:text-red-400"
+                  onClick={r.onRemove}
+                  aria-label={`Remove ${r.label}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function GoalTable({
+  mappings,
+  triggerName,
+  onRemove
+}: {
+  mappings: LikeMapping[]
+  triggerName: (uid: string) => string
+  onRemove: (index: number) => void
+}) {
+  if (mappings.length === 0) {
+    return <p className="py-1 text-sm text-zinc-500">No TITS goals set yet.</p>
+  }
+  return (
+    <div className="overflow-hidden rounded-md border border-zinc-800">
+      <table className="w-full text-sm">
+        <thead className="bg-zinc-900">
+          <tr>
+            <th className="px-2.5 py-1.5 text-left font-medium text-zinc-400">Threshold</th>
+            <th className="px-2.5 py-1.5 text-left font-medium text-zinc-400">Trigger</th>
+            <th className="w-12 px-2.5 py-1.5" />
+          </tr>
+        </thead>
+        <tbody>
+          {mappings.map((m, i) => (
+            <tr key={`${m.likeCount}-${i}`} className="border-t border-zinc-800/60">
+              <td className="px-2.5 py-1.5 font-medium">{m.likeCount}</td>
+              <td className="px-2.5 py-1.5 text-zinc-400">{triggerName(m.triggerId)}</td>
+              <td className="px-2.5 py-1.5 text-right">
+                <button
+                  className="text-zinc-600 transition-colors hover:text-red-400"
+                  onClick={() => onRemove(i)}
+                  aria-label={`Remove ${m.likeCount} like goal`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}

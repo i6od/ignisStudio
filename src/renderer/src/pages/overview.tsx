@@ -1,6 +1,7 @@
 import { Activity, Database, Gift, Heart, ListChecks, Settings2, Wifi, WifiOff } from 'lucide-react'
 import { useState } from 'react'
 
+import { EnabledToggle } from '@/components/bridge-parts'
 import { PageSection } from '@/components/page-section'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,7 +14,9 @@ type Tk = ReturnType<typeof useTikfinity>
 
 export function OverviewPage({ tk, onNavigate }: { tk: Tk; onNavigate: (p: PageId) => void }) {
   const vcConnected = tk.vconnectStatus === 'Connected'
+  const titsConnected = tk.titsStatus === 'Connected'
   const ttConnected = tk.tiktokStatus === 'Connected'
+  const anyConnected = vcConnected || titsConnected || ttConnected
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
@@ -23,29 +26,46 @@ export function OverviewPage({ tk, onNavigate }: { tk: Tk; onNavigate: (p: PageI
         description="Both WebSocket endpoints for the bridge"
         actions={
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={tk.refreshTriggers}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                tk.refreshTriggers()
+                tk.refreshTitsTriggers()
+              }}
+            >
               Refresh Triggers
             </Button>
-            <Button
-              size="sm"
-              onClick={() => (vcConnected || ttConnected ? tk.disconnect() : tk.connect())}
-            >
-              {vcConnected || ttConnected ? (
-                <WifiOff className="h-4 w-4" />
-              ) : (
-                <Wifi className="h-4 w-4" />
-              )}
-              {vcConnected || ttConnected ? 'Disconnect' : 'Connect All'}
+            <Button size="sm" onClick={() => (anyConnected ? tk.disconnect() : tk.connect())}>
+              {anyConnected ? <WifiOff className="h-4 w-4" /> : <Wifi className="h-4 w-4" />}
+              {anyConnected ? 'Disconnect' : 'Connect All'}
             </Button>
           </div>
         }
       >
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <EnabledToggle
+            label="VConnect"
+            enabled={tk.vconnectEnabled}
+            onToggle={tk.setVconnectEnabled}
+          />
+          <EnabledToggle label="TITS" enabled={tk.titsEnabled} onToggle={tk.setTitsEnabled} />
+          <span className="text-[10px] text-zinc-600">
+            Disabled APIs disconnect and stop firing their mappings
+          </span>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
           <ConnCard
             label="VConnect API"
-            status={tk.vconnectStatus}
+            status={tk.vconnectEnabled ? tk.vconnectStatus : 'Disabled'}
             url={tk.urls.vconnectUrl}
             connected={vcConnected}
+          />
+          <ConnCard
+            label="TITS API"
+            status={tk.titsEnabled ? tk.titsStatus : 'Disabled'}
+            url={tk.urls.titsUrl}
+            connected={titsConnected}
           />
           <ConnCard
             label="Tikfinity feed"
@@ -87,20 +107,20 @@ export function OverviewPage({ tk, onNavigate }: { tk: Tk; onNavigate: (p: PageI
         <StatCard
           icon={<Gift className="h-4 w-4" />}
           label="Gift maps"
-          value={tk.giftMappings.length}
-          onClick={() => onNavigate('mappings')}
+          value={tk.giftMappings.length + tk.titsGiftMappings.length}
+          onClick={() => onNavigate('vconnect-mappings')}
         />
         <StatCard
           icon={<Heart className="h-4 w-4" />}
           label="Like goals"
-          value={tk.likeMappings.length}
-          onClick={() => onNavigate('mappings')}
+          value={tk.likeMappings.length + tk.titsLikeMappings.length}
+          onClick={() => onNavigate('vconnect-mappings')}
         />
         <StatCard
           icon={<Activity className="h-4 w-4" />}
           label="Tracked users"
           value={tk.usersTracked}
-          onClick={() => onNavigate('mappings')}
+          onClick={() => onNavigate('vconnect-mappings')}
         />
       </div>
     </div>
@@ -118,7 +138,13 @@ function ConnCard({
   url: string
   connected: boolean
 }) {
-  const color = connected ? 'bg-emerald-500' : status.includes('Connecting') ? 'bg-amber-400 animate-pulse' : 'bg-red-500'
+  const color = connected
+    ? 'bg-emerald-500'
+    : status === 'Disabled'
+      ? 'bg-zinc-600'
+      : status.includes('Connecting')
+        ? 'bg-amber-400 animate-pulse'
+        : 'bg-red-500'
   return (
     <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5">
       <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${color}`} />
@@ -134,6 +160,7 @@ function ConnCard({
 
 const DEFAULT_ENDPOINTS = {
   vconnect: { host: 'localhost', port: '39542', path: '' },
+  tits: { host: 'localhost', port: '42069', path: '/websocket' },
   tiktok: { host: 'localhost', port: '21213', path: '' }
 }
 
@@ -153,6 +180,7 @@ function buildWsUrl(host: string, port: string, path: string): string {
 function AdvancedEndpoints({ tk }: { tk: Tk }) {
   const [open, setOpen] = useState(false)
   const [vc, setVc] = useState(() => parseWsUrl(tk.urls.vconnectUrl))
+  const [tits, setTits] = useState(() => parseWsUrl(tk.urls.titsUrl))
   const [tt, setTt] = useState(() => parseWsUrl(tk.urls.tiktokUrl))
 
   if (!open) {
@@ -184,6 +212,11 @@ function AdvancedEndpoints({ tk }: { tk: Tk }) {
         onChange={setVc}
       />
       <EndpointRow
+        label="TITS API"
+        value={tits}
+        onChange={setTits}
+      />
+      <EndpointRow
         label="Tikfinity feed"
         value={tt}
         onChange={setTt}
@@ -194,7 +227,11 @@ function AdvancedEndpoints({ tk }: { tk: Tk }) {
           size="sm"
           className="h-7"
           onClick={() => {
-            tk.applyUrls(buildWsUrl(vc.host, vc.port, vc.path), buildWsUrl(tt.host, tt.port, tt.path))
+            tk.applyUrls(
+              buildWsUrl(vc.host, vc.port, vc.path),
+              buildWsUrl(tits.host, tits.port, tits.path),
+              buildWsUrl(tt.host, tt.port, tt.path)
+            )
             setOpen(false)
           }}
         >
@@ -206,14 +243,19 @@ function AdvancedEndpoints({ tk }: { tk: Tk }) {
           className="h-7"
           onClick={() => {
             setVc(DEFAULT_ENDPOINTS.vconnect)
+            setTits(DEFAULT_ENDPOINTS.tits)
             setTt(DEFAULT_ENDPOINTS.tiktok)
-            tk.applyUrls(buildWsUrl(DEFAULT_ENDPOINTS.vconnect.host, DEFAULT_ENDPOINTS.vconnect.port, DEFAULT_ENDPOINTS.vconnect.path), buildWsUrl(DEFAULT_ENDPOINTS.tiktok.host, DEFAULT_ENDPOINTS.tiktok.port, DEFAULT_ENDPOINTS.tiktok.path))
+            tk.applyUrls(
+              buildWsUrl(DEFAULT_ENDPOINTS.vconnect.host, DEFAULT_ENDPOINTS.vconnect.port, DEFAULT_ENDPOINTS.vconnect.path),
+              buildWsUrl(DEFAULT_ENDPOINTS.tits.host, DEFAULT_ENDPOINTS.tits.port, DEFAULT_ENDPOINTS.tits.path),
+              buildWsUrl(DEFAULT_ENDPOINTS.tiktok.host, DEFAULT_ENDPOINTS.tiktok.port, DEFAULT_ENDPOINTS.tiktok.path)
+            )
             setOpen(false)
           }}
         >
           Reset to defaults
         </Button>
-        <span className="ml-auto text-[10px] text-zinc-600">{vc.path || tt.path ? 'Saved to localStorage · takes effect on next Connect' : 'Leave Path empty — VConnect serves on the bare port'}</span>
+        <span className="ml-auto text-[10px] text-zinc-600">VConnect serves on the bare port; TITS uses path /websocket · saved to localStorage</span>
       </div>
     </div>
   )

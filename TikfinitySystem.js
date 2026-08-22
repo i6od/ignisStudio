@@ -1,6 +1,7 @@
 'use strict';
 
 const DEFAULT_VCONNECT_URL = 'ws://localhost:39542';
+const DEFAULT_TITS_URL = 'ws://localhost:42069/websocket';
 const DEFAULT_TIKTOK_URL = 'ws://localhost:21213';
 const RETRY_DELAY = 30000;
 const TIKTOK_RETRY_DELAY = 5000;
@@ -9,11 +10,16 @@ const DEFAULT_STORAGE_KEY = 'vconnectTikfinityConfig';
 export class TikfinitySystem {
     constructor(options = {}) {
       this.vconnectUrl = options.vconnectUrl || DEFAULT_VCONNECT_URL;
+      this.titsUrl = options.titsUrl || DEFAULT_TITS_URL;
       this.tiktokUrl = options.tiktokUrl || DEFAULT_TIKTOK_URL;
       this.storageKey = options.storageKey || DEFAULT_STORAGE_KEY;
 
       this.vconnectSocket = null;
+      this.titsSocket = null;
       this.tiktokSocket = null;
+
+      this.vconnectEnabled = true;
+      this.titsEnabled = true;
 
       this.triggers = [];
       this.giftMappings = new Map();
@@ -23,6 +29,16 @@ export class TikfinitySystem {
       this.userLikeTotals = new Map();
       this.userNicknames = new Map();
       this.triggeredLikeGoals = new Map();
+
+      this.titsTriggers = [];
+      this.titsGiftMappings = new Map();
+      this.titsFollowId = null;
+      this.titsSubscribeId = null;
+      this.titsLikeMappings = [];
+      this.titsUserLikeTotals = new Map();
+      this.titsUserNicknames = new Map();
+      this.titsTriggeredLikeGoals = new Map();
+
       this.tiktokReconnectAttempts = 0;
       this.requestCounter = 0;
 
@@ -113,6 +129,24 @@ export class TikfinitySystem {
       }
     }
 
+    titsEnvelope(messageType, requestID, data) {
+      // Match the original T.I.T.S. client's wire format exactly: apiName,
+      // apiVersion, requestID, messageType — and data ONLY when it has content.
+      // (No timestamp; the TITS deserializer is stricter than VConnect's.)
+      const message = {
+        apiName: 'TITSPublicApi',
+        apiVersion: '1.0',
+        requestID,
+        messageType
+      };
+      if (data) message.data = data;
+      return message;
+    }
+
+    setTitsStatus(status, className) {
+      this.emit('titsStatus', { status, className });
+    }
+
     setTikfinityStatus(status, className) {
       this.emit('tiktokStatus', { status, className });
       const textEl = document.getElementById('tiktok-status-text');
@@ -135,6 +169,33 @@ export class TikfinitySystem {
 
     getLikeMappings() {
       return this.likeMappings.slice();
+    }
+
+    getTitsTriggers() {
+      return this.titsTriggers.slice();
+    }
+
+    getTitsGiftMappings() {
+      return new Map(this.titsGiftMappings);
+    }
+
+    getTitsLikeMappings() {
+      return this.titsLikeMappings.slice();
+    }
+
+    getTitsTriggerName(uid) {
+      const trigger = this.titsTriggers.find(t => t.uid === uid);
+      return trigger ? trigger.name : uid;
+    }
+
+    findTitsGiftTriggerCaseInsensitive(incomingGiftName) {
+      const lowerIncomingName = incomingGiftName.toLowerCase();
+      for (const [mappedGiftName, triggerId] of this.titsGiftMappings) {
+        if (mappedGiftName.toLowerCase() === lowerIncomingName) {
+          return triggerId;
+        }
+      }
+      return null;
     }
 
     getTriggerName(uid) {
@@ -283,6 +344,138 @@ export class TikfinitySystem {
       return true;
     }
 
+    disconnectTits() {
+      if (this.titsSocket) {
+        this.titsSocket.onclose = null;
+        this.titsSocket.close();
+        this.titsSocket = null;
+      }
+      this.setTitsStatus('Disconnected', 'disconnected');
+      this.log('TITS manually disconnected');
+    }
+
+    connectTits() {
+      if (this.titsSocket && this.titsSocket.readyState === WebSocket.OPEN) {
+        this.log('TITS WebSocket is already connected');
+        return;
+      }
+
+      try {
+        this.setTitsStatus('Connecting...', 'connecting');
+        this.titsSocket = new WebSocket(this.titsUrl);
+
+        this.titsSocket.onopen = () => {
+          this.setTitsStatus('Connected', 'connected');
+          this.log('TITS WebSocket connection established');
+          this.requestTitsTriggerList();
+        };
+
+        this.titsSocket.onmessage = (event) => {
+          this.handleTitsMessage(event);
+        };
+
+        this.titsSocket.onclose = () => {
+          this.setTitsStatus('Disconnected', 'disconnected');
+          this.log('TITS Connection lost. Retrying in 30 seconds...');
+          setTimeout(() => this.connectTits(), RETRY_DELAY);
+        };
+
+        this.titsSocket.onerror = () => {
+          this.setTitsStatus('Error', 'disconnected');
+          this.log('TITS WebSocket error', true);
+        };
+      } catch (e) {
+        this.setTitsStatus('Error', 'disconnected');
+        this.log(`Failed to create TITS WebSocket: ${e.message}`, true);
+        setTimeout(() => this.connectTits(), RETRY_DELAY);
+      }
+    }
+
+    handleTitsMessage(event) {
+      this.log(`Received from TITS: ${event.data}`);
+      try {
+        const jsonData = JSON.parse(event.data);
+        // Match messageType case-insensitively — the original client only ever
+        // saw 'TITSTriggerListResponse', but don't bet the feature on casing.
+        const messageType = String(jsonData.messageType || '').toLowerCase();
+
+        if (messageType === 'titstriggerlistresponse') {
+          const raw = jsonData.data || jsonData;
+          const rawTriggers = raw.triggers || jsonData.triggers || [];
+          this.titsTriggers = rawTriggers.map(trigger => ({
+            uid: String(trigger.ID != null ? trigger.ID : (trigger.id != null ? trigger.id : trigger.uid)),
+            name: trigger.name != null ? trigger.name : String(trigger.ID != null ? trigger.ID : trigger.id),
+            enabled: true,
+            nodeCount: undefined
+          }));
+          this.saveConfig();
+          this.log(`TITS trigger list loaded: ${this.titsTriggers.length} triggers`);
+          this.emit('titsTriggersLoaded', this.titsTriggers);
+        } else if (messageType === 'titstriggeractivateresponse') {
+          const data = jsonData.data || {};
+          this.emit('titsTriggerActivated', data);
+          this.log(`TITS activation response: ${data.name || data.triggerID || '?'} success=${data.success}`);
+        } else if (messageType === 'errorresponse') {
+          const message = (jsonData.data && jsonData.data.message) || 'Unknown TITS error';
+          this.log(`TITS error: ${message}`, true);
+          this.emit('titsError', jsonData.data);
+        } else {
+          this.emit('titsMessage', jsonData);
+        }
+      } catch (e) {
+        this.log(`Error parsing TITS message: ${e.message}`, true);
+      }
+    }
+
+    requestTitsTriggerList() {
+      if (!this.titsSocket || this.titsSocket.readyState !== WebSocket.OPEN) {
+        this.log('TITS WebSocket is not connected', true);
+        return false;
+      }
+      const message = this.titsEnvelope('TITSTriggerListRequest', this.nextRequestId());
+      this.titsSocket.send(JSON.stringify(message));
+      this.log(`Sent to TITS: ${JSON.stringify(message)}`);
+      return true;
+    }
+
+    sendTitsTrigger(triggerId) {
+      if (triggerId == null) return false;
+      if (!this.titsSocket || this.titsSocket.readyState !== WebSocket.OPEN) {
+        this.log('TITS WebSocket is not connected', true);
+        return false;
+      }
+
+      const trigger = this.titsTriggers.find(t => t.uid === triggerId);
+      const message = this.titsEnvelope('TITSTriggerActivateRequest', this.nextRequestId(), {
+        triggerID: triggerId
+      });
+
+      this.titsSocket.send(JSON.stringify(message));
+      this.log(`Sent TITS trigger activation: ${triggerId}`);
+      this.emit('titsTriggerFired', { uid: triggerId, name: trigger ? trigger.name : triggerId });
+      return true;
+    }
+
+    setVconnectEnabled(enabled) {
+      this.vconnectEnabled = !!enabled;
+      this.saveConfig();
+      if (!this.vconnectEnabled) {
+        this.disconnectVConnect();
+        this.log('VConnect API disabled');
+      }
+      this.emit('apiTogglesChanged', { vconnectEnabled: this.vconnectEnabled, titsEnabled: this.titsEnabled });
+    }
+
+    setTitsEnabled(enabled) {
+      this.titsEnabled = !!enabled;
+      this.saveConfig();
+      if (!this.titsEnabled) {
+        this.disconnectTits();
+        this.log('TITS API disabled');
+      }
+      this.emit('apiTogglesChanged', { vconnectEnabled: this.vconnectEnabled, titsEnabled: this.titsEnabled });
+    }
+
     connectTikfinity() {
       if (this.tiktokSocket && this.tiktokSocket.readyState === WebSocket.OPEN) {
         this.log('Tikfinity WebSocket is already connected');
@@ -370,9 +563,15 @@ export class TikfinitySystem {
       }
 
       const triggerId = this.findGiftTriggerCaseInsensitive(giftData.giftName);
-      if (triggerId) {
+      if (triggerId && this.vconnectEnabled) {
         this.sendTrigger(triggerId);
         this.log(`Mapped gift "${giftData.giftName}" to trigger ${triggerId}`);
+      }
+
+      const titsTriggerId = this.findTitsGiftTriggerCaseInsensitive(giftData.giftName);
+      if (titsTriggerId && this.titsEnabled) {
+        this.sendTitsTrigger(titsTriggerId);
+        this.log(`Mapped gift "${giftData.giftName}" to TITS trigger ${titsTriggerId}`);
       }
     }
 
@@ -388,9 +587,14 @@ export class TikfinitySystem {
         this.setHtml('lastSubscriberImage', `<img src="${subscribeData.profilePictureUrl}" alt="${subscribeData.nickname}" class="profile-img">`);
       }
 
-      if (this.subscribeUid) {
+      if (this.subscribeUid && this.vconnectEnabled) {
         this.sendTrigger(this.subscribeUid);
         this.log(`Triggered subscribe event with trigger ${this.subscribeUid}`);
+      }
+
+      if (this.titsSubscribeId && this.titsEnabled) {
+        this.sendTitsTrigger(this.titsSubscribeId);
+        this.log(`Triggered subscribe event with TITS trigger ${this.titsSubscribeId}`);
       }
     }
 
@@ -405,9 +609,14 @@ export class TikfinitySystem {
         this.setHtml('lastFollowerImage', `<img src="${followData.profilePictureUrl}" alt="${followData.nickname}" class="profile-img">`);
       }
 
-      if (this.followUid) {
+      if (this.followUid && this.vconnectEnabled) {
         this.sendTrigger(this.followUid);
         this.log(`Triggered follow event with trigger ${this.followUid}`);
+      }
+
+      if (this.titsFollowId && this.titsEnabled) {
+        this.sendTitsTrigger(this.titsFollowId);
+        this.log(`Triggered follow event with TITS trigger ${this.titsFollowId}`);
       }
     }
 
@@ -446,7 +655,7 @@ export class TikfinitySystem {
         const threshold = mapping.likeCount;
         this.log(`Checking like goal ${threshold}: user total=${newTotal}, previous=${previousTotal}, already triggered=${userTriggeredGoals ? userTriggeredGoals.has(threshold) : 'N/A'}`);
 
-        if (newTotal >= threshold && previousTotal < threshold &&
+        if (this.vconnectEnabled && newTotal >= threshold && previousTotal < threshold &&
             userTriggeredGoals && !userTriggeredGoals.has(threshold)) {
           userTriggeredGoals.add(threshold);
           try {
@@ -456,6 +665,33 @@ export class TikfinitySystem {
             this.log(`Error sending trigger for like goal ${threshold}: ${e.message}`, true);
           }
         }
+      }
+
+      if (this.titsEnabled && this.titsLikeMappings.length > 0) {
+        if (!this.titsUserLikeTotals.has(userId)) {
+          this.titsUserLikeTotals.set(userId, 0);
+          this.titsTriggeredLikeGoals.set(userId, new Set());
+        }
+        this.titsUserNicknames.set(userId, likeData.nickname);
+        const titsPreviousTotal = this.titsUserLikeTotals.get(userId);
+        const titsNewTotal = titsPreviousTotal + likeCount;
+        this.titsUserLikeTotals.set(userId, titsNewTotal);
+
+        const titsTriggeredGoals = this.titsTriggeredLikeGoals.get(userId);
+        for (const mapping of this.titsLikeMappings) {
+          const threshold = mapping.likeCount;
+          if (titsNewTotal >= threshold && titsPreviousTotal < threshold &&
+              titsTriggeredGoals && !titsTriggeredGoals.has(threshold)) {
+            titsTriggeredGoals.add(threshold);
+            try {
+              const triggerResult = this.sendTitsTrigger(mapping.triggerId);
+              this.log(`TITS TRIGGER FIRED: User ${likeData.uniqueId} reached like goal ${threshold} (total: ${titsNewTotal}), triggered ${mapping.triggerId}, result: ${triggerResult}`);
+            } catch (e) {
+              this.log(`Error sending TITS trigger for like goal ${threshold}: ${e.message}`, true);
+            }
+          }
+        }
+        this.updateTitsLikeTrackingStats();
       }
     }
 
@@ -564,6 +800,101 @@ export class TikfinitySystem {
       }
     }
 
+    updateTitsLikeTrackingStats() {
+      let topLikerUserId = null;
+      let topLikerCount = 0;
+      this.titsUserLikeTotals.forEach((count, userId) => {
+        if (count > topLikerCount) {
+          topLikerCount = count;
+          topLikerUserId = userId;
+        }
+      });
+
+      const topLikerName = topLikerUserId ? (this.titsUserNicknames.get(topLikerUserId) || topLikerUserId) : 'None';
+      this.emit('titsLikeStats', {
+        usersTracked: this.titsUserLikeTotals.size,
+        topLikerName,
+        topLikerCount
+      });
+    }
+
+    clearTitsLikeTracking() {
+      const userCount = this.titsUserLikeTotals.size;
+      this.titsUserLikeTotals.clear();
+      this.titsUserNicknames.clear();
+      this.titsTriggeredLikeGoals.clear();
+      this.log(`Cleared TITS like tracking data for ${userCount} users`);
+      this.updateTitsLikeTrackingStats();
+    }
+
+    addTitsGiftMapping(giftName, triggerId) {
+      if (!giftName || !triggerId) {
+        this.log('Please provide both gift name and TITS trigger', true);
+        return false;
+      }
+      this.titsGiftMappings.set(giftName, triggerId);
+      this.saveConfig();
+      this.emit('titsMappingChanged', this.getTitsGiftMappings());
+      this.log(`Added TITS mapping: ${giftName} -> ${triggerId} (case-insensitive matching enabled)`);
+      return true;
+    }
+
+    removeTitsGiftMapping(giftName) {
+      this.titsGiftMappings.delete(giftName);
+      this.saveConfig();
+      this.emit('titsMappingChanged', this.getTitsGiftMappings());
+      this.log(`Removed TITS mapping for gift: ${giftName}`);
+    }
+
+    setTitsFollowId(uid) {
+      this.titsFollowId = uid || null;
+      if (this.titsFollowId) {
+        this.log(`Set TITS follow event to trigger: ${this.titsFollowId}`);
+      } else {
+        this.log('TITS follow trigger mapping cleared', true);
+      }
+      this.saveConfig();
+    }
+
+    setTitsSubscribeId(uid) {
+      this.titsSubscribeId = uid || null;
+      if (this.titsSubscribeId) {
+        this.log(`Set TITS subscribe event to trigger: ${this.titsSubscribeId}`);
+      } else {
+        this.log('TITS subscribe trigger mapping cleared', true);
+      }
+      this.saveConfig();
+    }
+
+    addTitsLikeMapping(likeCount, uid) {
+      likeCount = parseInt(likeCount);
+      if (isNaN(likeCount) || likeCount <= 0 || !uid) {
+        this.log('Please enter a valid like count and select a TITS trigger', true);
+        return false;
+      }
+
+      const existingIndex = this.titsLikeMappings.findIndex(mapping => mapping.likeCount === likeCount);
+      if (existingIndex >= 0) {
+        this.titsLikeMappings[existingIndex].triggerId = uid;
+        this.log(`Updated TITS like mapping: ${likeCount} likes -> ${uid}`);
+      } else {
+        this.titsLikeMappings.push({ likeCount, triggerId: uid });
+        this.log(`Added TITS like mapping: ${likeCount} likes -> ${uid}`);
+      }
+
+      this.titsLikeMappings.sort((a, b) => a.likeCount - b.likeCount);
+      this.saveConfig();
+      return true;
+    }
+
+    removeTitsLikeMapping(index) {
+      if (index >= 0 && index < this.titsLikeMappings.length) {
+        const removed = this.titsLikeMappings.splice(index, 1)[0];
+        this.saveConfig();
+        this.log(`Removed TITS mapping for ${removed.likeCount} likes`);
+      }
+    }
+
     loadConfig() {
       const savedConfig = localStorage.getItem(this.storageKey);
       if (!savedConfig) return;
@@ -590,6 +921,28 @@ export class TikfinitySystem {
           this.log('No like mappings found in saved config');
         }
 
+        if (loadedConfig.titsTriggers) {
+          this.titsTriggers = loadedConfig.titsTriggers;
+        }
+        if (loadedConfig.titsGiftMappings) {
+          this.titsGiftMappings = new Map(Object.entries(loadedConfig.titsGiftMappings));
+        }
+        if (loadedConfig.titsFollowId != null) {
+          this.titsFollowId = loadedConfig.titsFollowId;
+        }
+        if (loadedConfig.titsSubscribeId != null) {
+          this.titsSubscribeId = loadedConfig.titsSubscribeId;
+        }
+        if (loadedConfig.titsLikeMappings) {
+          this.titsLikeMappings = loadedConfig.titsLikeMappings;
+        }
+        if (loadedConfig.vconnectEnabled === false) {
+          this.vconnectEnabled = false;
+        }
+        if (loadedConfig.titsEnabled === false) {
+          this.titsEnabled = false;
+        }
+
         this.syncTriggerUi();
         this.syncGiftMappingUi();
         this.syncFollowMappingUi();
@@ -606,6 +959,13 @@ export class TikfinitySystem {
       this._config.followUid = this.followUid;
       this._config.subscribeUid = this.subscribeUid;
       this._config.likeMappings = this.likeMappings;
+      this._config.titsTriggers = this.titsTriggers;
+      this._config.titsGiftMappings = Object.fromEntries(this.titsGiftMappings);
+      this._config.titsFollowId = this.titsFollowId;
+      this._config.titsSubscribeId = this.titsSubscribeId;
+      this._config.titsLikeMappings = this.titsLikeMappings;
+      this._config.vconnectEnabled = this.vconnectEnabled;
+      this._config.titsEnabled = this.titsEnabled;
       this._config.lastUpdated = new Date().toISOString();
       try {
         localStorage.setItem(this.storageKey, JSON.stringify(this._config));
