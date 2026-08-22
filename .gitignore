@@ -12,4 +12,5 @@ dist/
 *.db-wal
 *.db-shm
 .hermes/
-tmp/.zcode/
+tmp/
+.zcode/

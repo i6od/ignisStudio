@@ -41,6 +41,10 @@ export class TikfinitySystem {
 
       this.tiktokReconnectAttempts = 0;
       this.requestCounter = 0;
+      // Recently-seen Tikfinity event signatures -> expiry ts. Guards against
+      // the relay replaying its event buffer to a freshly reconnected client
+      // (the 5s-reconnect double-fire).
+      this._recentEvents = new Map();
 
       this._listeners = new Map();
       this._config = {
@@ -234,9 +238,18 @@ export class TikfinitySystem {
     }
 
     connectVConnect() {
-      if (this.vconnectSocket && this.vconnectSocket.readyState === WebSocket.OPEN) {
-        this.log('VConnect WebSocket is already connected');
+      if (
+        this.vconnectSocket &&
+        (this.vconnectSocket.readyState === WebSocket.OPEN ||
+          this.vconnectSocket.readyState === WebSocket.CONNECTING)
+      ) {
+        this.log('VConnect WebSocket is already connected or connecting');
         return;
+      }
+      if (this.vconnectSocket) {
+        const old = this.vconnectSocket;
+        old.onclose = null;
+        old.close();
       }
 
       try {
@@ -355,9 +368,18 @@ export class TikfinitySystem {
     }
 
     connectTits() {
-      if (this.titsSocket && this.titsSocket.readyState === WebSocket.OPEN) {
-        this.log('TITS WebSocket is already connected');
+      if (
+        this.titsSocket &&
+        (this.titsSocket.readyState === WebSocket.OPEN ||
+          this.titsSocket.readyState === WebSocket.CONNECTING)
+      ) {
+        this.log('TITS WebSocket is already connected or connecting');
         return;
+      }
+      if (this.titsSocket) {
+        const old = this.titsSocket;
+        old.onclose = null;
+        old.close();
       }
 
       try {
@@ -477,13 +499,25 @@ export class TikfinitySystem {
     }
 
     connectTikfinity() {
-      if (this.tiktokSocket && this.tiktokSocket.readyState === WebSocket.OPEN) {
-        this.log('Tikfinity WebSocket is already connected');
+      if (
+        this.tiktokSocket &&
+        (this.tiktokSocket.readyState === WebSocket.OPEN ||
+          this.tiktokSocket.readyState === WebSocket.CONNECTING)
+      ) {
+        this.log('Tikfinity WebSocket is already connected or connecting');
         return;
       }
 
+      // Null handlers BEFORE closing a leftover socket: the old onclose would
+      // otherwise schedule its own reconnect and leave a second live Tikfinity
+      // socket receiving (and double-firing) every event.
       if (this.tiktokSocket) {
-        this.tiktokSocket.close();
+        const old = this.tiktokSocket;
+        old.onopen = null;
+        old.onmessage = null;
+        old.onclose = null;
+        old.onerror = null;
+        old.close();
       }
 
       try {
@@ -523,16 +557,43 @@ export class TikfinitySystem {
       }
     }
 
+    // Returns true when this exact event was already processed recently
+    // (reconnect replay). Only trusts strong identity fields — a timestamp,
+    // createTime or explicit event id — so legitimate repeats of the same gift
+    // are never dropped.
+    isReplayedTikfinityEvent(eventName, data) {
+      const strongId = data.eventId ?? data.event_id ?? data.timestamp ?? data.createTime ?? data.serverTimestamp;
+      if (strongId == null) return false;
+
+      const signature = `${eventName}:${data.userId ?? data.uniqueId ?? ''}:${data.giftName ?? ''}:${strongId}`;
+      const now = Date.now();
+      for (const [sig, expiry] of this._recentEvents) {
+        if (expiry < now) this._recentEvents.delete(sig);
+      }
+      if (this._recentEvents.has(signature)) {
+        this.log(`Dropped replayed ${eventName} event (already processed)`);
+        return true;
+      }
+      this._recentEvents.set(signature, now + 15000);
+      return false;
+    }
+
     handleTikfinityMessage(event) {
       try {
         const jsonData = JSON.parse(event.data);
 
         if (jsonData.event === 'gift') {
-          this.handleTikfinityGift(jsonData.data);
+          if (!this.isReplayedTikfinityEvent('gift', jsonData.data)) {
+            this.handleTikfinityGift(jsonData.data);
+          }
         } else if (jsonData.event === 'subscribe') {
-          this.handleTikfinitySubscribe(jsonData.data);
+          if (!this.isReplayedTikfinityEvent('subscribe', jsonData.data)) {
+            this.handleTikfinitySubscribe(jsonData.data);
+          }
         } else if (jsonData.event === 'follow') {
-          this.handleTikfinityFollow(jsonData.data);
+          if (!this.isReplayedTikfinityEvent('follow', jsonData.data)) {
+            this.handleTikfinityFollow(jsonData.data);
+          }
         } else if (jsonData.event === 'like') {
           this.handleTikfinityLike(jsonData.data);
         } else if (jsonData.event === 'comment' || jsonData.event === 'chat') {
@@ -560,6 +621,19 @@ export class TikfinitySystem {
       this.setText('lastGiftValue', giftData.diamondCount * giftData.repeatCount);
       if (giftData.giftPictureUrl) {
         this.setHtml('lastGiftImage', `<img src="${giftData.giftPictureUrl}" alt="${giftData.giftName}" class="gift-img">`);
+      }
+
+      // TikTok sends streakable gifts (Roses etc.) as several events while the
+      // combo is in progress, then a final one with repeatEnd=true. Firing the
+      // mapping on every event made one combo fire the trigger multiple times
+      // (the "same trigger again ~5s later" glitch). Fire once, when the combo
+      // closes — or immediately for non-streak gifts / payloads without streak
+      // fields (older relay firmware).
+      const streakInProgress =
+        giftData.repeatEnd === false && (giftData.giftType == null || giftData.giftType === 1);
+      if (streakInProgress) {
+        this.log(`Gift "${giftData.giftName}" combo in progress (x${giftData.repeatCount}) — waiting for repeatEnd to fire mappings`);
+        return;
       }
 
       const triggerId = this.findGiftTriggerCaseInsensitive(giftData.giftName);

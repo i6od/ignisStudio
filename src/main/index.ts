@@ -130,6 +130,19 @@ app.whenReady().then(() => {
   })
 })
 
+// A second instance would open its own Tikfinity/VConnect sockets and
+// double-fire every mapping — refuse to run alongside the first.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+    }
+  })
+}
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
