@@ -91,7 +91,6 @@ export function useTikfinity() {
   const [vconnectEnabled, setVconnectEnabledState] = useState(true)
   const [titsEnabled, setTitsEnabledState] = useState(true)
   const [events, setEvents] = useState<FeedEvent[]>([])
-  const [giftFrames, setGiftFrames] = useState<{ ts: number; raw: string }[]>([])
   const [usersTracked, setUsersTracked] = useState(0)
   const [topLiker, setTopLiker] = useState<{ name: string; count: number } | null>(null)
   const [supporterSummary, setSupporterSummary] = useState<SupporterSummary | null>(null)
@@ -307,10 +306,6 @@ export function useTikfinity() {
       setVconnectEnabledState(t.vconnectEnabled)
       setTitsEnabledState(t.titsEnabled)
     }
-    const onGiftFrame = (data: unknown) => {
-      const f = data as { ts: number; raw: string }
-      setGiftFrames(prev => [...prev.slice(-29), f])
-    }
 
     system.on('vconnectStatus', onVcStatus)
     system.on('titsStatus', onTitsStatus)
@@ -334,7 +329,6 @@ export function useTikfinity() {
     system.on('titsTriggerActivated', onTitsTriggerActivated)
     system.on('titsLikeStats', onTitsLikeStats)
     system.on('apiTogglesChanged', onApiToggles)
-    system.on('giftFrame', onGiftFrame)
 
     setTriggers(system.getTriggers())
     setGiftMappings(Array.from(system.getGiftMappings().entries()))
@@ -372,7 +366,6 @@ export function useTikfinity() {
     system.off('titsTriggerActivated', onTitsTriggerActivated)
     system.off('titsLikeStats', onTitsLikeStats)
     system.off('apiTogglesChanged', onApiToggles)
-    system.off('giftFrame', onGiftFrame)
     // KILL the old sockets too — otherwise every effect re-run (e.g. saving
     // endpoints) leaves the previous system's WebSockets open against the same
     // relay/VConnect, and a single gift gets processed by BOTH systems -> the
@@ -560,7 +553,6 @@ export function useTikfinity() {
     getTitsTriggerName,
     fireResults,
     fireResultsTits,
-    giftFrames,
     supporterSummary,
     getTopSupporters,
     refreshSupporterSummary: () => {
