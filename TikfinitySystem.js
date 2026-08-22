@@ -594,7 +594,9 @@ export class TikfinitySystem {
         const jsonData = JSON.parse(event.data);
 
         if (jsonData.event === 'gift') {
-          // Raw frame log: makes any duplicate delivery diagnosable at a glance.
+          // Raw frame exposed to the UI (Overview → Gift frames debug panel):
+          // makes any duplicate delivery diagnosable at a glance.
+          this.emit('giftFrame', { ts: Date.now(), raw: String(event.data) });
           this.log(`Gift frame: ${event.data}`);
           if (!this.isReplayedTikfinityEvent('gift', jsonData.data)) {
             this.handleTikfinityGift(jsonData.data);

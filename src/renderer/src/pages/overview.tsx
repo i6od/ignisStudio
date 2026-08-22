@@ -1,4 +1,4 @@
-import { Activity, Database, Gift, Heart, ListChecks, Settings2, Wifi, WifiOff } from 'lucide-react'
+import { Activity, Bug, Database, Gift, Heart, ListChecks, Settings2, Wifi, WifiOff } from 'lucide-react'
 import { useState } from 'react'
 
 import { EnabledToggle } from '@/components/bridge-parts'
@@ -93,6 +93,27 @@ export function OverviewPage({ tk, onNavigate }: { tk: Tk; onNavigate: (p: PageI
               <EventTypeBadge type={e.type} />
               <span className="truncate">{e.detail}</span>
             </div>
+          ))}
+        </div>
+      </PageSection>
+
+      <PageSection
+        icon={<Bug className="h-4 w-4" />}
+        title="Gift frames (debug)"
+        description="Raw gift events exactly as Tikfinity delivered them — for spotting duplicates"
+      >
+        <div className="max-h-48 space-y-1 overflow-y-auto">
+          {tk.giftFrames.length === 0 && (
+            <p className="text-sm text-zinc-500">No gift frames received yet…</p>
+          )}
+          {[...tk.giftFrames].reverse().map((f, i) => (
+            <p
+              key={`${f.ts}-${i}`}
+              className="rounded-md border border-zinc-800 bg-zinc-900/60 px-2.5 py-1.5 font-mono text-[10px] leading-relaxed text-zinc-400"
+            >
+              <span className="text-zinc-600">{new Date(f.ts).toLocaleTimeString()} </span>
+              {f.raw}
+            </p>
           ))}
         </div>
       </PageSection>
