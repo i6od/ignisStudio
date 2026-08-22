@@ -45,6 +45,13 @@ export class TikfinitySystem {
       // the relay replaying its event buffer to a freshly reconnected client
       // (the 5s-reconnect double-fire).
       this._recentEvents = new Map();
+      // Open gift combos ("${userId}|${giftName}" -> { data, timer }) and combos
+      // we already force-flushed (key -> expiry ts). TikTok sends streakable
+      // gifts as several events and a final repeatEnd one; we hold the
+      // intermediates so one combo = one feed entry, one supporter record and
+      // one trigger fire.
+      this._pendingCombos = new Map();
+      this._flushedCombos = new Map();
 
       this._listeners = new Map();
       this._config = {
@@ -563,9 +570,13 @@ export class TikfinitySystem {
     // are never dropped.
     isReplayedTikfinityEvent(eventName, data) {
       const strongId = data.eventId ?? data.event_id ?? data.timestamp ?? data.createTime ?? data.serverTimestamp;
-      if (strongId == null) return false;
-
-      const signature = `${eventName}:${data.userId ?? data.uniqueId ?? ''}:${data.giftName ?? ''}:${strongId}`;
+      // With a strong identity field, key on it; otherwise fall back to the
+      // full payload hash — a byte-identical repeat inside the window is a
+      // replay/redelivery, never a legitimate new event.
+      const signature =
+        strongId != null
+          ? `${eventName}:${data.userId ?? data.uniqueId ?? ''}:${data.giftName ?? ''}:${strongId}`
+          : `${eventName}:${JSON.stringify(data)}`;
       const now = Date.now();
       for (const [sig, expiry] of this._recentEvents) {
         if (expiry < now) this._recentEvents.delete(sig);
@@ -583,6 +594,8 @@ export class TikfinitySystem {
         const jsonData = JSON.parse(event.data);
 
         if (jsonData.event === 'gift') {
+          // Raw frame log: makes any duplicate delivery diagnosable at a glance.
+          this.log(`Gift frame: ${event.data}`);
           if (!this.isReplayedTikfinityEvent('gift', jsonData.data)) {
             this.handleTikfinityGift(jsonData.data);
           }
@@ -612,6 +625,56 @@ export class TikfinitySystem {
     }
 
     handleTikfinityGift(giftData) {
+      const comboKey = `${giftData.userId ?? giftData.uniqueId ?? 'unknown'}|${giftData.giftName}`;
+      const hasStreakFields = giftData.giftType != null || giftData.repeatEnd != null;
+      const comboInProgress = hasStreakFields && giftData.repeatEnd === false;
+
+      if (comboInProgress) {
+        // Streakable gift (TikTok giftType 1): this is one of the intermediate
+        // events TikTok emits while the combo is open — hold it. The final
+        // repeatEnd event (whose repeatCount is the streak total) is the only
+        // one that reaches the feed, supporters and mappings.
+        const existing = this._pendingCombos.get(comboKey);
+        if (existing && existing.timer) clearTimeout(existing.timer);
+        const entry = { data: giftData, timer: null };
+        entry.timer = setTimeout(() => this.flushPendingCombo(comboKey), 10000);
+        this._pendingCombos.set(comboKey, entry);
+        this.log(`Gift "${giftData.giftName}" combo in progress (x${giftData.repeatCount}) — waiting for repeatEnd`);
+        return;
+      }
+
+      // A combo we already force-flushed (repeatEnd never arrived): drop the
+      // late final event so the gift isn't counted twice.
+      const flushedExpiry = this._flushedCombos.get(comboKey);
+      if (flushedExpiry != null) {
+        this._flushedCombos.delete(comboKey);
+        if (Date.now() < flushedExpiry) {
+          this.log(`Dropped late repeatEnd for "${giftData.giftName}" — combo already flushed`);
+          return;
+        }
+      }
+
+      const pending = this._pendingCombos.get(comboKey);
+      if (pending) {
+        if (pending.timer) clearTimeout(pending.timer);
+        this._pendingCombos.delete(comboKey);
+      }
+
+      this.processGiftEvent(giftData);
+    }
+
+    // Safety net: if the streak-end event never arrives (socket dropped
+    // mid-combo), flush the held event after 10s so the gift isn't lost.
+    flushPendingCombo(comboKey) {
+      const held = this._pendingCombos.get(comboKey);
+      this._pendingCombos.delete(comboKey);
+      if (!held) return;
+      this.log(`Combo for "${held.data.giftName}" never sent repeatEnd — flushing after timeout`);
+      this._flushedCombos.set(comboKey, Date.now() + 10000);
+      this.processGiftEvent(held.data);
+    }
+
+    processGiftEvent(giftData) {
       this.log(`Tikfinity Gift: ${giftData.nickname} sent ${giftData.giftName} x${giftData.repeatCount}`);
       this.emit('gift', giftData);
 
@@ -621,19 +684,6 @@ export class TikfinitySystem {
       this.setText('lastGiftValue', giftData.diamondCount * giftData.repeatCount);
       if (giftData.giftPictureUrl) {
         this.setHtml('lastGiftImage', `<img src="${giftData.giftPictureUrl}" alt="${giftData.giftName}" class="gift-img">`);
-      }
-
-      // TikTok sends streakable gifts (Roses etc.) as several events while the
-      // combo is in progress, then a final one with repeatEnd=true. Firing the
-      // mapping on every event made one combo fire the trigger multiple times
-      // (the "same trigger again ~5s later" glitch). Fire once, when the combo
-      // closes — or immediately for non-streak gifts / payloads without streak
-      // fields (older relay firmware).
-      const streakInProgress =
-        giftData.repeatEnd === false && (giftData.giftType == null || giftData.giftType === 1);
-      if (streakInProgress) {
-        this.log(`Gift "${giftData.giftName}" combo in progress (x${giftData.repeatCount}) — waiting for repeatEnd to fire mappings`);
-        return;
       }
 
       const triggerId = this.findGiftTriggerCaseInsensitive(giftData.giftName);
