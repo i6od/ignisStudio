@@ -1,16 +1,24 @@
-import { Cable, Info, LayoutDashboard, ListChecks, Rocket, Sparkles, Trophy } from 'lucide-react'
+import { Cable, Coins, Info, Layers, LayoutDashboard, ListChecks, Rocket, Sparkles, Trophy } from 'lucide-react'
 import { useState } from 'react'
 
 import { ConnectionStatusBadge, EnabledToggle } from '@/components/bridge-parts'
 import { Button } from '@/components/ui/button'
 import { useTikfinity } from '@/hooks/use-tikfinity'
+import { useYouTubeTracker } from '@/hooks/use-youtube-tracker'
 import { AboutPage } from '@/pages/about'
+import { GiftTrackerPage } from '@/pages/gift-tracker'
+import { LiveActivityPage } from '@/pages/live-activity'
 import { MappingsPage } from '@/pages/mappings'
 import { OverviewPage } from '@/pages/overview'
 import { SupportersPage } from '@/pages/supporters'
 import { TitsMappingsPage } from '@/pages/tits-mappings'
 import { TriggersPage } from '@/pages/triggers'
 import { cn } from '@/lib/utils'
+import {
+  isYouTubePolling,
+  isYouTubeSourceConfigured,
+  toggleBridgeAndYouTube
+} from '@/lib/bridge-controls'
 import type { PageId } from '@/lib/pages'
 
 const NAV: { id: PageId; label: string; icon: React.ReactNode }[] = [
@@ -18,18 +26,45 @@ const NAV: { id: PageId; label: string; icon: React.ReactNode }[] = [
   { id: 'triggers', label: 'Triggers', icon: <ListChecks className="h-4 w-4" /> },
   { id: 'vconnect-mappings', label: 'VConnect Maps', icon: <Rocket className="h-4 w-4" /> },
   { id: 'tits-mappings', label: 'TITS Maps', icon: <Sparkles className="h-4 w-4" /> },
+  { id: 'gift-tracker', label: 'Youtube Maps', icon: <Coins className="h-4 w-4" /> },
+  { id: 'live-activity', label: 'Live Activity', icon: <Layers className="h-4 w-4" /> },
   { id: 'supporters', label: 'Supporters', icon: <Trophy className="h-4 w-4" /> },
   { id: 'about', label: 'About', icon: <Info className="h-4 w-4" /> }
 ]
 
 export default function App() {
   const tk = useTikfinity()
+  // Mounted here rather than in the page: the main process owns the poll loop,
+  // but trigger firing happens in the renderer, so it must survive tab changes.
+  const yt = useYouTubeTracker(tk)
   const [page, setPage] = useState<PageId>('overview')
+
+  // The YouTube source has no socket to watch: the main-process poller reports
+  // its state, so the pill reads that instead.
+  const ytRunning = isYouTubePolling(yt.status)
+  const ytReadingChat = !!yt.status?.liveChatId
+  const ytBusy = yt.status?.state === 'Resolving...' || yt.status?.state === 'Reading...'
+  const ytStatus = ytRunning && ytReadingChat ? 'Connected' : ytRunning || ytBusy ? 'Connecting...' : 'Disconnected'
+  const ytTitle = yt.status?.error
+    ? `YouTube: ${yt.status.error}`
+    : ytRunning && ytReadingChat
+      ? `Reading ${yt.status?.channelTitle || yt.status?.handle || 'the live chat'}${
+          yt.status?.streamTitle ? ` — ${yt.status.streamTitle}` : ''
+        }`
+      : ytRunning
+        ? 'YouTube source running — waiting for a live chat to read'
+        : 'YouTube source not started — turn it on in Overview'
+
+  // Only auto-start the poller when there is something it could actually read,
+  // otherwise Connect would just raise a "add a key / enter a target" error.
+  const ytConfigured = isYouTubeSourceConfigured(yt.config)
 
   const vcConnected = tk.vconnectStatus === 'Connected'
   const titsConnected = tk.titsStatus === 'Connected'
   const ttConnected = tk.tiktokStatus === 'Connected'
-  const anyConnected = vcConnected || titsConnected || ttConnected
+  const anyConnected = vcConnected || titsConnected || ttConnected || ytRunning
+
+  const toggleAll = () => toggleBridgeAndYouTube({ bridge: tk, youtube: yt, connected: anyConnected })
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
@@ -86,12 +121,23 @@ export default function App() {
               status={tk.titsEnabled ? tk.titsStatus : 'Disabled'}
               label="TITS"
             />
-            <ConnectionStatusBadge status={tk.tiktokStatus} label="Tikfinity" />
+            <ConnectionStatusBadge
+              status={tk.tiktokStatus}
+              label={tk.feedSource === 'builtin' ? 'TikTok Live' : 'Tikfinity'}
+            />
+            <ConnectionStatusBadge status={ytStatus} label="YouTube" title={ytTitle} />
             <Button
               size="sm"
               variant="outline"
               className="ml-1 h-7"
-              onClick={() => (anyConnected ? tk.disconnect() : tk.connect())}
+              title={
+                anyConnected
+                  ? 'Disconnect the TikTok feed, VConnect, TITS and the YouTube live poller'
+                  : ytConfigured
+                    ? 'Connect the bridge and start the YouTube live poller'
+                    : 'Connect the bridge (add a YouTube key and target in Overview to include YouTube)'
+              }
+              onClick={toggleAll}
             >
               {anyConnected ? 'Disconnect' : 'Connect'}
             </Button>
@@ -99,10 +145,12 @@ export default function App() {
         </header>
 
         <main className="min-h-0 flex-1 overflow-y-auto p-4">
-          {page === 'overview' && <OverviewPage tk={tk} onNavigate={setPage} />}
+          {page === 'overview' && <OverviewPage tk={tk} yt={yt} onNavigate={setPage} />}
           {page === 'triggers' && <TriggersPage tk={tk} />}
           {page === 'vconnect-mappings' && <MappingsPage tk={tk} />}
           {page === 'tits-mappings' && <TitsMappingsPage tk={tk} />}
+          {page === 'gift-tracker' && <GiftTrackerPage tk={tk} yt={yt} onNavigate={setPage} />}
+          {page === 'live-activity' && <LiveActivityPage tk={tk} yt={yt} />}
           {page === 'supporters' && <SupportersPage tk={tk} />}
           {page === 'about' && <AboutPage />}
         </main>

@@ -1,4 +1,4 @@
-import { Crown, Gem, MessageSquare, RefreshCcw, ThumbsUp, Trash2, Trophy } from 'lucide-react'
+import { Crown, Gem, MessageSquare, RefreshCcw, ThumbsUp, Trash2, Trophy, Video } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import { PageSection } from '@/components/page-section'
@@ -7,7 +7,7 @@ import type { useTikfinity } from '@/hooks/use-tikfinity'
 
 type Tk = ReturnType<typeof useTikfinity>
 
-type Tab = 'gifts' | 'likes' | 'comments'
+type Tab = 'gifts' | 'jewels' | 'likes' | 'comments'
 
 interface Supporter {
   user_key: string
@@ -15,21 +15,34 @@ interface Supporter {
   nickname: string | null
   avatar: string | null
   diamonds: number
+  jewels: number
   likes_count: number
   comments_count: number
+  source: 'tiktok' | 'youtube'
 }
 
 export function SupportersPage({ tk }: { tk: Tk }) {
   const [tab, setTab] = useState<Tab>('gifts')
   const [rows, setRows] = useState<Supporter[]>([])
 
+  // tk is a new object on every render; the function itself is stable, so hold
+  // onto it instead of the whole hook or the refresh effect would re-run forever.
+  const getTopSupporters = tk.getTopSupporters
   const load = useCallback(async () => {
-    setRows(await tk.getTopSupporters(tab, 20))
-  }, [tk, tab])
+    setRows(await getTopSupporters(tab, 20))
+  }, [getTopSupporters, tab])
 
   useEffect(() => {
-    load()
+    void load()
   }, [load])
+
+  // The hook re-summarises after every recorded event, so the board follows a
+  // live stream without hammering SQLite: coalesce the burst into one reload.
+  const summary = tk.supporterSummary
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 900)
+    return () => window.clearTimeout(timer)
+  }, [load, summary])
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
@@ -58,13 +71,20 @@ export function SupportersPage({ tk }: { tk: Tk }) {
           </div>
         }
       >
-        <div className="mb-3 grid grid-cols-3 gap-2">
+        <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-4">
           <TabButton
             active={tab === 'gifts'}
             onClick={() => setTab('gifts')}
             icon={<Gem className="h-3.5 w-3.5" />}
-            label="Top Gifters"
+            label="Top TikTok gifters"
             sub={tk.supporterSummary?.topGifter ? `${tk.supporterSummary.topGifter.nickname} · ${tk.supporterSummary.topGifter.count} 💎` : 'No data'}
+          />
+          <TabButton
+            active={tab === 'jewels'}
+            onClick={() => setTab('jewels')}
+            icon={<Video className="h-3.5 w-3.5" />}
+            label="Top YouTube gifters"
+            sub={tk.supporterSummary?.topJeweler ? `${tk.supporterSummary.topJeweler.nickname} · ${tk.supporterSummary.topJeweler.count} ◆ jewels` : 'No data'}
           />
           <TabButton
             active={tab === 'likes'}
@@ -138,9 +158,11 @@ function SupporterRow({ row, rank, tab }: { row: Supporter; rank: number; tab: T
   const count =
     tab === 'gifts'
       ? `${row.diamonds} 💎`
-      : tab === 'likes'
-        ? `${row.likes_count} ❤`
-        : `${row.comments_count} 💬`
+      : tab === 'jewels'
+        ? `${row.jewels} ◆`
+        : tab === 'likes'
+          ? `${row.likes_count} ❤`
+          : `${row.comments_count} 💬`
   const name = row.nickname ?? row.unique_id ?? row.user_key ?? 'anonymous'
 
   return (
@@ -161,7 +183,14 @@ function SupporterRow({ row, rank, tab }: { row: Supporter; rank: number; tab: T
       )}
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{name}</p>
-        <p className="truncate text-[10px] text-zinc-500">@{row.unique_id ?? row.user_key}</p>
+        <p className="flex items-center gap-1.5 truncate text-[10px] text-zinc-500">
+          <span className="truncate">@{row.unique_id ?? row.user_key}</span>
+          {row.source === 'youtube' ? (
+            <span className="shrink-0 rounded border border-red-500/40 bg-red-500/10 px-1 text-[9px] text-red-300">
+              YouTube
+            </span>
+          ) : null}
+        </p>
       </div>
       {rank <= 3 && (
         <Crown

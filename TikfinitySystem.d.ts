@@ -1,8 +1,17 @@
+export type TikTokFeedSource = 'relay' | 'embedded'
+
 export interface TikfinityOptions {
   vconnectUrl?: string
   titsUrl?: string
   tiktokUrl?: string
   storageKey?: string
+  /** 'relay' = Tikfinity WebSocket at tiktokUrl (default), 'embedded' = in-app connector */
+  feedSource?: TikTokFeedSource
+}
+
+export interface TikTokFeedFrame {
+  event: string
+  data: Record<string, unknown>
 }
 
 export interface Trigger {
@@ -14,6 +23,16 @@ export interface Trigger {
 
 export interface LikeMapping {
   likeCount: number
+  triggerId: string
+}
+
+/** 'above' = more than min, 'below' = less than min, 'range' = between min and max (both ends included). */
+export type DiamondRuleOp = 'above' | 'below' | 'range'
+
+export interface DiamondRule {
+  op: DiamondRuleOp
+  min: number
+  max: number | null
   triggerId: string
 }
 
@@ -63,6 +82,7 @@ export declare class TikfinitySystem {
   titsUrl: string
   tiktokUrl: string
   storageKey: string
+  feedSource: TikTokFeedSource
   vconnectEnabled: boolean
   titsEnabled: boolean
   triggers: Trigger[]
@@ -70,6 +90,7 @@ export declare class TikfinitySystem {
   followUid: string | null
   subscribeUid: string | null
   likeMappings: LikeMapping[]
+  diamondRules: DiamondRule[]
   userLikeTotals: Map<string, number>
   userNicknames: Map<string, string>
   triggeredLikeGoals: Map<string, Set<number>>
@@ -78,6 +99,7 @@ export declare class TikfinitySystem {
   titsFollowId: string | null
   titsSubscribeId: string | null
   titsLikeMappings: LikeMapping[]
+  titsDiamondRules: DiamondRule[]
   titsUserLikeTotals: Map<string, number>
   titsUserNicknames: Map<string, string>
   titsTriggeredLikeGoals: Map<string, Set<number>>
@@ -93,6 +115,8 @@ export declare class TikfinitySystem {
   disconnectVConnect(): void
   disconnectTits(): void
   disconnectTikfinity(): void
+  setFeedSource(source: TikTokFeedSource): TikTokFeedSource
+  ingestTikfinityFrame(payload: TikTokFeedFrame | string): boolean
   requestTriggerList(): boolean
   requestTitsTriggerList(): boolean
   sendTrigger(triggerId: string): boolean
@@ -101,6 +125,10 @@ export declare class TikfinitySystem {
   getTriggers(): Trigger[]
   getGiftMappings(): Map<string, string>
   getLikeMappings(): LikeMapping[]
+  getDiamondRules(): DiamondRule[]
+  getTitsDiamondRules(): DiamondRule[]
+  diamondRuleMatches(rule: DiamondRule, diamonds: number): boolean
+  describeDiamondRule(rule: DiamondRule): string
   getTriggerName(uid: string): string
   getTitsTriggers(): Trigger[]
   getTitsGiftMappings(): Map<string, string>
@@ -115,6 +143,8 @@ export declare class TikfinitySystem {
   removeTitsGiftMapping(giftName: string): void
   addTitsLikeMapping(likeCount: number | string, uid: string): boolean
   removeTitsLikeMapping(index: number): void
+  addTitsDiamondRule(op: DiamondRuleOp, min: number | string, max: number | string | null, uid: string): boolean
+  removeTitsDiamondRule(index: number): void
   clearTitsLikeTracking(): void
   updateTitsLikeTrackingStats(): void
 
@@ -124,6 +154,8 @@ export declare class TikfinitySystem {
   removeGiftMapping(giftName: string): void
   addLikeMapping(likeCount: number | string, uid: string): boolean
   removeLikeMapping(index: number): void
+  addDiamondRule(op: DiamondRuleOp, min: number | string, max: number | string | null, uid: string): boolean
+  removeDiamondRule(index: number): void
   clearLikeTracking(): void
   updateLikeTrackingStats(): void
 

@@ -15,7 +15,15 @@ export function ConnectionDot({ status }: { status: string }) {
   return <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${color}`} />
 }
 
-export function ConnectionStatusBadge({ status, label }: { status: string; label: string }) {
+export function ConnectionStatusBadge({
+  status,
+  label,
+  title
+}: {
+  status: string
+  label: string
+  title?: string
+}) {
   const variant =
     status === 'Connected'
       ? 'default'
@@ -23,7 +31,7 @@ export function ConnectionStatusBadge({ status, label }: { status: string; label
         ? 'secondary'
         : 'destructive'
   return (
-    <Badge variant={variant} className="gap-1.5">
+    <Badge variant={variant} className="gap-1.5" title={title}>
       <ConnectionDot status={status} />
       {label}
     </Badge>

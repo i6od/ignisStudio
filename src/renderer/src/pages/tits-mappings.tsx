@@ -2,6 +2,7 @@ import { Gift, Heart, Rocket, Sparkles, Trash2, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 
 import { PageSection } from '@/components/page-section'
+import { DiamondRulesSection } from '@/components/diamond-rules'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -70,6 +71,16 @@ export function TitsMappingsPage({ tk }: { tk: Tk }) {
           />
         </div>
       </PageSection>
+
+      <DiamondRulesSection
+        title="TITS diamond value rules"
+        rules={tk.titsDiamondRules}
+        triggers={tk.titsTriggers}
+        triggerName={tk.getTitsTriggerName}
+        onAdd={(op, min, max, id) => tk.addTitsDiamondRule(op, min, max, id)}
+        onRemove={i => tk.removeTitsDiamondRule(i)}
+        triggerPlaceholder="TITS trigger…"
+      />
 
       <PageSection
         icon={<Rocket className="h-4 w-4" />}

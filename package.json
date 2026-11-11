@@ -1,6 +1,6 @@
 {
   "name": "vconnect-bridge",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "Tikfinity → VConnect bridge desktop app (Brij Studio)",
   "main": "./out/main/index.js",
   "author": "",
@@ -81,7 +81,8 @@
     "lucide-react": "^1.30.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "tiktok-live-connector": "^2.5.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",

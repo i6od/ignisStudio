@@ -9,6 +9,36 @@ import {
   type RecordEventInput,
   type SupporterMetric
 } from './db'
+import {
+  getTikTokLiveStatus,
+  setTikTokLiveHandlers,
+  startTikTokLive,
+  stopTikTokLive
+} from './tiktok-live'
+import {
+  clearYouTubeLog,
+  exportYouTubeLog,
+  getQuotaSnapshot,
+  getYouTubeConfig,
+  getYouTubeRawPage,
+  getYouTubeSession,
+  getYouTubeStats,
+  getStatus as getYouTubeStatus,
+  listYouTubeGiftNames,
+  listYouTubeMessages,
+  loadYouTubeSettings,
+  previewYouTubeLive,
+  resetSession as resetYouTubeSession,
+  resetYouTubeQuota,
+  setYouTubeConfig,
+  setYouTubeHandlers,
+  shutdownYouTube,
+  startYouTube,
+  stopYouTubePolling,
+  type YouTubeConfig
+} from './youtube-live'
+import { deleteMapping, listMappings, upsertMapping } from './youtube-db'
+import { appendEvent, clearEventLog, getEventLogStats, listEventLog, type EventLogInput } from './event-log'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -39,6 +69,67 @@ function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('update:getVersion', () => app.getVersion())
+
+  // Built-in TikTok LIVE feed (the in-app alternative to the Tikfinity relay).
+  // Frames arrive already normalized to the relay's wire shape, so the
+  // renderer pipes them into the same handlers either way.
+  setTikTokLiveHandlers({
+    onFrame: (frame) => sendToRenderer('tiktok:event', frame),
+    onStatus: (status) => sendToRenderer('tiktok:status', status)
+  })
+
+  ipcMain.handle('tiktok:start', (_e, username: string) => startTikTokLive(username))
+  ipcMain.handle('tiktok:stop', () => {
+    stopTikTokLive()
+    return getTikTokLiveStatus()
+  })
+  ipcMain.handle('tiktok:getStatus', () => getTikTokLiveStatus())
+
+  // YouTube gift tracker. Polling, key rotation and quota accounting all live
+  // here so the tracker keeps running when the tab is not mounted, and the API
+  // keys never reach the renderer bundle.
+  setYouTubeHandlers({
+    onEvent: (payload) => sendToRenderer('youtube:event', payload),
+    onStatus: (status) => sendToRenderer('youtube:status', status)
+  })
+  loadYouTubeSettings()
+
+  ipcMain.handle('youtube:getConfig', () => getYouTubeConfig())
+  ipcMain.handle('youtube:setConfig', (_e, partial: Partial<YouTubeConfig>) => setYouTubeConfig(partial))
+  ipcMain.handle('youtube:start', (_e, partial?: Partial<YouTubeConfig>) => startYouTube(partial))
+  ipcMain.handle('youtube:preview', (_e, partial?: Partial<YouTubeConfig>) => previewYouTubeLive(partial))
+  ipcMain.handle('youtube:stop', () => stopYouTubePolling())
+  ipcMain.handle('youtube:reset', () => {
+    resetYouTubeSession()
+    return getYouTubeStatus()
+  })
+  ipcMain.handle('youtube:getStatus', () => getYouTubeStatus())
+  ipcMain.handle('youtube:listMessages', (_e, limit?: number) => listYouTubeMessages(limit ?? 1000))
+  ipcMain.handle('youtube:getStats', () => getYouTubeStats())
+  ipcMain.handle('youtube:getGiftNames', () => listYouTubeGiftNames())
+  ipcMain.handle('youtube:getSession', () => getYouTubeSession())
+  ipcMain.handle('youtube:getRaw', () => getYouTubeRawPage())
+  ipcMain.handle('youtube:getQuota', () => getQuotaSnapshot())
+  ipcMain.handle('youtube:resetQuota', () => resetYouTubeQuota())
+  ipcMain.handle('youtube:clearLog', () => clearYouTubeLog())
+  ipcMain.handle('youtube:export', (_e, format: 'csv' | 'json') => exportYouTubeLog(format))
+  ipcMain.handle('youtube:listMappings', () => listMappings())
+  ipcMain.handle(
+    'youtube:setMapping',
+    (_e, giftName: string, vconnectUid: string | null, titsUid: string | null) =>
+      upsertMapping(giftName, vconnectUid, titsUid)
+  )
+  ipcMain.handle('youtube:deleteMapping', (_e, giftName: string) => deleteMapping(giftName))
+
+  // Combined TikTok + YouTube timeline. TikTok events are pushed from the
+  // renderer because the bridge handlers live there.
+  ipcMain.handle('events:append', (_e, input: EventLogInput) => appendEvent(input))
+  ipcMain.handle('events:list', (_e, limit?: number) => listEventLog(limit ?? 300))
+  ipcMain.handle('events:stats', () => getEventLogStats())
+  ipcMain.handle('events:clear', () => {
+    clearEventLog()
+    return getEventLogStats()
+  })
 }
 
 function sendToRenderer(channel: string, payload?: unknown): void {
@@ -144,5 +235,10 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on('window-all-closed', () => {
+  // The TikTok socket and the YouTube poll timer are both held by the main
+  // process, so they have to be closed here — otherwise a reconnect or poll
+  // timer keeps the app alive with no window.
+  stopTikTokLive()
+  shutdownYouTube()
   if (process.platform !== 'darwin') app.quit()
 })

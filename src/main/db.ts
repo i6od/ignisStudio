@@ -2,7 +2,9 @@ import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
 
-export type SupporterMetric = 'gifts' | 'likes' | 'comments'
+export type SupporterMetric = 'gifts' | 'likes' | 'comments' | 'jewels'
+
+export type SupporterSource = 'tiktok' | 'youtube'
 
 export interface SupporterRow {
   user_key: string
@@ -17,6 +19,8 @@ export interface SupporterRow {
   subs_count: number
   first_seen: number
   last_seen: number
+  source: SupporterSource
+  jewels: number
 }
 
 export interface RecordEventInput {
@@ -57,6 +61,20 @@ function getDb(): Database.Database {
       CREATE INDEX IF NOT EXISTS idx_supporters_likes ON supporters(likes_count DESC);
       CREATE INDEX IF NOT EXISTS idx_supporters_comments ON supporters(comments_count DESC);
     `)
+
+    // Added when YouTube gifts joined the leaderboard. Jewels are YouTube's
+    // currency and diamonds are TikTok's, so they stay in separate columns
+    // rather than being merged into one meaningless total.
+    const columns = new Set(
+      (db.prepare('PRAGMA table_info(supporters)').all() as { name: string }[]).map((c) => c.name)
+    )
+    if (!columns.has('source')) {
+      db.prepare(`ALTER TABLE supporters ADD COLUMN source TEXT NOT NULL DEFAULT 'tiktok'`).run()
+    }
+    if (!columns.has('jewels')) {
+      db.prepare(`ALTER TABLE supporters ADD COLUMN jewels INTEGER NOT NULL DEFAULT 0`).run()
+    }
+    db.prepare('CREATE INDEX IF NOT EXISTS idx_supporters_jewels ON supporters(jewels DESC)').run()
   }
   return db
 }
@@ -114,10 +132,63 @@ export function recordEvent(input: RecordEventInput): void {
   }
 }
 
+export interface YouTubeGiftInput {
+  channelId?: string
+  displayName?: string
+  avatar?: string
+  jewels?: number
+  at?: number
+}
+
+/**
+ * YouTube gifters share the leaderboard with TikTok gifters but never the
+ * currency column: jewels land in `jewels`, diamonds in `diamonds`. The key is
+ * namespaced with `yt:` so a channel id can never collide with a TikTok user id.
+ */
+export function recordYouTubeGift(input: YouTubeGiftInput): void {
+  const d = getDb()
+  const key = input.channelId
+    ? `yt:${input.channelId}`
+    : input.displayName
+      ? `yt:${input.displayName}`
+      : 'anon'
+  const now = input.at ?? Date.now()
+
+  d.prepare(`
+    INSERT INTO supporters (user_key, unique_id, nickname, avatar, first_seen, last_seen, source)
+    VALUES (@key, @uniqueId, @nickname, @avatar, @now, @now, 'youtube')
+    ON CONFLICT(user_key) DO UPDATE SET
+      unique_id = COALESCE(NULLIF(@uniqueId, ''), unique_id),
+      nickname  = COALESCE(NULLIF(@nickname, ''), nickname),
+      avatar    = COALESCE(NULLIF(@avatar, ''), avatar),
+      last_seen = @now
+  `).run({
+    key,
+    uniqueId: input.displayName ?? null,
+    nickname: input.displayName ?? null,
+    avatar: input.avatar ?? null,
+    now
+  })
+
+  const jewels = input.jewels ?? 0
+  if (jewels > 0) {
+    d.prepare('UPDATE supporters SET gifts_count = gifts_count + 1, jewels = jewels + ? WHERE user_key = ?').run(
+      jewels,
+      key
+    )
+  }
+}
+
 export function getTopSupporters(metric: SupporterMetric, limit = 10): SupporterRow[] {
   const d = getDb()
   const column =
-    metric === 'gifts' ? 'diamonds' : metric === 'likes' ? 'likes_count' : 'comments_count'
+    metric === 'gifts'
+      ? 'diamonds'
+      : metric === 'likes'
+        ? 'likes_count'
+        : metric === 'comments'
+          ? 'comments_count'
+          : 'jewels'
   return d
     .prepare(`SELECT * FROM supporters WHERE ${column} > 0 ORDER BY ${column} DESC LIMIT ?`)
     .all(limit) as SupporterRow[]
@@ -128,13 +199,17 @@ export function getSummary(): {
   topGifter: SupporterRow | null
   topLiker: SupporterRow | null
   topCommenter: SupporterRow | null
+  topJeweler: SupporterRow | null
 } {
   const d = getDb()
+  // Only report a leader that actually has a count: without the "> 0" filter a
+  // supporter with zero likes showed up as the "top liker" of an empty board.
   return {
     total: (d.prepare('SELECT COUNT(*) AS c FROM supporters').get() as { c: number }).c,
-    topGifter: (d.prepare('SELECT * FROM supporters ORDER BY diamonds DESC LIMIT 1').get() as SupporterRow) ?? null,
-    topLiker: (d.prepare('SELECT * FROM supporters ORDER BY likes_count DESC LIMIT 1').get() as SupporterRow) ?? null,
-    topCommenter: (d.prepare('SELECT * FROM supporters ORDER BY comments_count DESC LIMIT 1').get() as SupporterRow) ?? null
+    topGifter: (d.prepare('SELECT * FROM supporters WHERE diamonds > 0 ORDER BY diamonds DESC LIMIT 1').get() as SupporterRow) ?? null,
+    topLiker: (d.prepare('SELECT * FROM supporters WHERE likes_count > 0 ORDER BY likes_count DESC LIMIT 1').get() as SupporterRow) ?? null,
+    topCommenter: (d.prepare('SELECT * FROM supporters WHERE comments_count > 0 ORDER BY comments_count DESC LIMIT 1').get() as SupporterRow) ?? null,
+    topJeweler: (d.prepare('SELECT * FROM supporters WHERE jewels > 0 ORDER BY jewels DESC LIMIT 1').get() as SupporterRow) ?? null
   }
 }
 

@@ -13,6 +13,11 @@ export class TikfinitySystem {
       this.titsUrl = options.titsUrl || DEFAULT_TITS_URL;
       this.tiktokUrl = options.tiktokUrl || DEFAULT_TIKTOK_URL;
       this.storageKey = options.storageKey || DEFAULT_STORAGE_KEY;
+      // Where TikTok events come from: 'relay' = the Tikfinity WebSocket at
+      // tiktokUrl, 'embedded' = frames pushed in by the app's own
+      // tiktok-live-connector via ingestTikfinityFrame(). Everything downstream
+      // (dedup, combos, mappings, triggers) is identical for both.
+      this.feedSource = options.feedSource === 'embedded' ? 'embedded' : 'relay';
 
       this.vconnectSocket = null;
       this.titsSocket = null;
@@ -26,6 +31,7 @@ export class TikfinitySystem {
       this.followUid = null;
       this.subscribeUid = null;
       this.likeMappings = [];
+      this.diamondRules = [];
       this.userLikeTotals = new Map();
       this.userNicknames = new Map();
       this.triggeredLikeGoals = new Map();
@@ -35,6 +41,7 @@ export class TikfinitySystem {
       this.titsFollowId = null;
       this.titsSubscribeId = null;
       this.titsLikeMappings = [];
+      this.titsDiamondRules = [];
       this.titsUserLikeTotals = new Map();
       this.titsUserNicknames = new Map();
       this.titsTriggeredLikeGoals = new Map();
@@ -194,6 +201,35 @@ export class TikfinitySystem {
       return this.titsLikeMappings.slice();
     }
 
+    getDiamondRules() {
+      return this.diamondRules.slice();
+    }
+
+    getTitsDiamondRules() {
+      return this.titsDiamondRules.slice();
+    }
+
+    /**
+     * Does a gift's diamond value match a rule? The value compared is the whole
+     * gift event (unit value x combo count), so a 5-diamond rose sent as a x100
+     * combo counts as 500. 'above' and 'below' are exclusive; 'range' includes
+     * both ends.
+     */
+    diamondRuleMatches(rule, diamonds) {
+      if (!rule || diamonds == null || isNaN(diamonds)) return false;
+      if (rule.op === 'above') return diamonds > rule.min;
+      if (rule.op === 'below') return diamonds < rule.min;
+      if (rule.op === 'range') return diamonds >= rule.min && diamonds <= rule.max;
+      return false;
+    }
+
+    describeDiamondRule(rule) {
+      if (!rule) return '';
+      if (rule.op === 'above') return `more than ${rule.min} diamonds`;
+      if (rule.op === 'below') return `under ${rule.min} diamonds`;
+      return `${rule.min}-${rule.max} diamonds`;
+    }
+
     getTitsTriggerName(uid) {
       const trigger = this.titsTriggers.find(t => t.uid === uid);
       return trigger ? trigger.name : uid;
@@ -235,6 +271,12 @@ export class TikfinitySystem {
     }
 
     disconnectTikfinity() {
+      if (this.feedSource === 'embedded') {
+        // The built-in feed is owned by the main process and stopped through
+        // window.vconnect.tiktokLive.stop(), which reports its own status.
+        // Emitting a status here would race that report.
+        return;
+      }
       if (this.tiktokSocket) {
         this.tiktokSocket.onclose = null;
         this.tiktokSocket.close();
@@ -505,7 +547,41 @@ export class TikfinitySystem {
       this.emit('apiTogglesChanged', { vconnectEnabled: this.vconnectEnabled, titsEnabled: this.titsEnabled });
     }
 
+    /**
+     * Switch TikTok event source without rebuilding the system (mappings,
+     * like totals and combo buffers all survive the switch). Switching away
+     * from the relay has to close its socket first — and null its handlers,
+     * because onclose would otherwise schedule a reconnect that keeps feeding
+     * events into this same instance next to the built-in feed.
+     */
+    setFeedSource(source) {
+      const next = source === 'embedded' ? 'embedded' : 'relay';
+      if (next === this.feedSource) return this.feedSource;
+
+      if (next === 'embedded' && this.tiktokSocket) {
+        const old = this.tiktokSocket;
+        old.onopen = null;
+        old.onmessage = null;
+        old.onclose = null;
+        old.onerror = null;
+        this.tiktokSocket = null;
+        old.close();
+      }
+
+      this.feedSource = next;
+      this.log(`TikTok feed source: ${next === 'embedded' ? 'built-in connector' : 'Tikfinity relay'}`);
+      this.emit('feedSourceChanged', { feedSource: next });
+      return this.feedSource;
+    }
+
     connectTikfinity() {
+      if (this.feedSource === 'embedded') {
+        // No relay socket: the app itself holds the TikTok connection in the
+        // main process and pushes frames through ingestTikfinityFrame().
+        this.log('Tikfinity relay skipped — using the built-in TikTok feed');
+        return;
+      }
+
       if (
         this.tiktokSocket &&
         (this.tiktokSocket.readyState === WebSocket.OPEN ||
@@ -591,27 +667,52 @@ export class TikfinitySystem {
 
     handleTikfinityMessage(event) {
       try {
-        const jsonData = JSON.parse(event.data);
-
-        if (jsonData.event === 'gift') {
-          if (!this.isReplayedTikfinityEvent('gift', jsonData.data)) {
-            this.handleTikfinityGift(jsonData.data);
-          }
-        } else if (jsonData.event === 'subscribe') {
-          if (!this.isReplayedTikfinityEvent('subscribe', jsonData.data)) {
-            this.handleTikfinitySubscribe(jsonData.data);
-          }
-        } else if (jsonData.event === 'follow') {
-          if (!this.isReplayedTikfinityEvent('follow', jsonData.data)) {
-            this.handleTikfinityFollow(jsonData.data);
-          }
-        } else if (jsonData.event === 'like') {
-          this.handleTikfinityLike(jsonData.data);
-        } else if (jsonData.event === 'comment' || jsonData.event === 'chat') {
-          this.handleTikfinityComment(jsonData.data);
-        }
+        this.dispatchTikfinityEvent(JSON.parse(event.data));
       } catch (e) {
         this.log(`Error parsing Tikfinity message: ${e.message}`, true);
+      }
+    }
+
+    /**
+     * Feed one already-decoded event in from the built-in connector.
+     * Accepts { event, data } (what the main process sends) or a raw JSON
+     * string, and runs it through the exact same dedup + combo + mapping
+     * pipeline as a relay frame, so trigger behaviour does not depend on
+     * which source produced the event.
+     */
+    ingestTikfinityFrame(payload) {
+      try {
+        const jsonData = typeof payload === 'string' ? JSON.parse(payload) : payload;
+        if (!jsonData || typeof jsonData !== 'object' || !jsonData.event) return false;
+        this.dispatchTikfinityEvent({ event: jsonData.event, data: jsonData.data || {} });
+        return true;
+      } catch (e) {
+        this.log(`Error ingesting built-in TikTok event: ${e.message}`, true);
+        return false;
+      }
+    }
+
+    dispatchTikfinityEvent(jsonData) {
+      const data = jsonData.data || {};
+
+      if (jsonData.event === 'gift') {
+        if (!this.isReplayedTikfinityEvent('gift', data)) {
+          this.handleTikfinityGift(data);
+        }
+      } else if (jsonData.event === 'subscribe') {
+        if (!this.isReplayedTikfinityEvent('subscribe', data)) {
+          this.handleTikfinitySubscribe(data);
+        }
+      } else if (jsonData.event === 'follow') {
+        if (!this.isReplayedTikfinityEvent('follow', data)) {
+          this.handleTikfinityFollow(data);
+        }
+      } else if (jsonData.event === 'like') {
+        if (!this.isReplayedTikfinityEvent('like', data)) {
+          this.handleTikfinityLike(data);
+        }
+      } else if (jsonData.event === 'comment' || jsonData.event === 'chat') {
+        this.handleTikfinityComment(data);
       }
     }
 
@@ -695,6 +796,38 @@ export class TikfinitySystem {
         this.sendTitsTrigger(titsTriggerId);
         this.log(`Mapped gift "${giftData.giftName}" to TITS trigger ${titsTriggerId}`);
       }
+
+      // Value rules: matched on the whole gift event, so a combo is judged by
+      // what it actually cost, not by the base price of the gift.
+      const diamonds = (giftData.diamondCount || 0) * (giftData.repeatCount || 1);
+
+      for (const rule of this.diamondRules) {
+        if (!this.diamondRuleMatches(rule, diamonds)) continue;
+        if (this.vconnectEnabled) {
+          try {
+            this.sendTrigger(rule.triggerId);
+            this.log(
+              `Diamond rule "${this.describeDiamondRule(rule)}" matched ${giftData.giftName} x${giftData.repeatCount} (${diamonds} diamonds) -> trigger ${rule.triggerId}`
+            );
+          } catch (e) {
+            this.log(`Error sending trigger for diamond rule ${this.describeDiamondRule(rule)}: ${e.message}`, true);
+          }
+        }
+      }
+
+      for (const rule of this.titsDiamondRules) {
+        if (!this.diamondRuleMatches(rule, diamonds)) continue;
+        if (this.titsEnabled) {
+          try {
+            this.sendTitsTrigger(rule.triggerId);
+            this.log(
+              `TITS diamond rule "${this.describeDiamondRule(rule)}" matched ${giftData.giftName} x${giftData.repeatCount} (${diamonds} diamonds) -> trigger ${rule.triggerId}`
+            );
+          } catch (e) {
+            this.log(`Error sending TITS trigger for diamond rule ${this.describeDiamondRule(rule)}: ${e.message}`, true);
+          }
+        }
+      }
     }
 
     handleTikfinitySubscribe(subscribeData) {
@@ -772,6 +905,10 @@ export class TikfinitySystem {
       this.log(`User triggered goals: ${Array.from(userTriggeredGoals || []).join(', ')}`);
 
       this.updateLikeTrackingStats();
+
+      // Without this the app never learns a like happened: the feed, the shared
+      // timeline and the supporter totals all hang off this event.
+      this.emit('like', likeData);
 
       for (const mapping of this.likeMappings) {
         const threshold = mapping.likeCount;
@@ -910,6 +1047,7 @@ export class TikfinitySystem {
       this.likeMappings.sort((a, b) => a.likeCount - b.likeCount);
       this.syncLikeMappingUi();
       this.saveConfig();
+      this.emit('likeMappingChanged', this.getLikeMappings());
       return true;
     }
 
@@ -918,7 +1056,65 @@ export class TikfinitySystem {
         const removed = this.likeMappings.splice(index, 1)[0];
         this.syncLikeMappingUi();
         this.saveConfig();
+        this.emit('likeMappingChanged', this.getLikeMappings());
         this.log(`Removed mapping for ${removed.likeCount} likes`);
+      }
+    }
+
+    // Shared validation for both diamond-value rule lists.
+    normalizeDiamondRule(op, min, max, uid) {
+      const ops = ['above', 'below', 'range'];
+      op = ops.indexOf(op) >= 0 ? op : null;
+      min = parseInt(min, 10);
+      max = max == null || max === '' ? null : parseInt(max, 10);
+
+      if (!op) return { error: 'Pick a comparison (greater than / less than / between)' };
+      if (isNaN(min) || min < 0) return { error: 'Enter a valid diamond amount' };
+      if (op === 'range') {
+        if (isNaN(max) || max < min) return { error: 'The top of a range has to be at least the bottom' };
+      } else {
+        max = null;
+      }
+      if (!uid) return { error: 'Select a trigger for the rule' };
+
+      return { rule: { op, min, max, triggerId: uid } };
+    }
+
+    sortDiamondRules(rules) {
+      const order = { above: 0, below: 1, range: 2 };
+      rules.sort((a, b) => order[a.op] - order[b.op] || a.min - b.min || (a.max || 0) - (b.max || 0));
+    }
+
+    addDiamondRule(op, min, max, uid) {
+      const { rule, error } = this.normalizeDiamondRule(op, min, max, uid);
+      if (error) {
+        this.log(`Cannot add diamond rule: ${error}`, true);
+        return false;
+      }
+
+      const existingIndex = this.diamondRules.findIndex(
+        r => r.op === rule.op && r.min === rule.min && r.max === rule.max
+      );
+      if (existingIndex >= 0) {
+        this.diamondRules[existingIndex].triggerId = rule.triggerId;
+        this.log(`Updated diamond rule: ${this.describeDiamondRule(rule)} -> ${uid}`);
+      } else {
+        this.diamondRules.push(rule);
+        this.log(`Added diamond rule: ${this.describeDiamondRule(rule)} -> ${uid}`);
+      }
+
+      this.sortDiamondRules(this.diamondRules);
+      this.saveConfig();
+      this.emit('diamondRuleChanged', this.getDiamondRules());
+      return true;
+    }
+
+    removeDiamondRule(index) {
+      if (index >= 0 && index < this.diamondRules.length) {
+        const removed = this.diamondRules.splice(index, 1)[0];
+        this.saveConfig();
+        this.emit('diamondRuleChanged', this.getDiamondRules());
+        this.log(`Removed diamond rule: ${this.describeDiamondRule(removed)}`);
       }
     }
 
@@ -1006,6 +1202,7 @@ export class TikfinitySystem {
 
       this.titsLikeMappings.sort((a, b) => a.likeCount - b.likeCount);
       this.saveConfig();
+      this.emit('titsLikeMappingChanged', this.getTitsLikeMappings());
       return true;
     }
 
@@ -1013,7 +1210,41 @@ export class TikfinitySystem {
       if (index >= 0 && index < this.titsLikeMappings.length) {
         const removed = this.titsLikeMappings.splice(index, 1)[0];
         this.saveConfig();
+        this.emit('titsLikeMappingChanged', this.getTitsLikeMappings());
         this.log(`Removed TITS mapping for ${removed.likeCount} likes`);
+      }
+    }
+
+    addTitsDiamondRule(op, min, max, uid) {
+      const { rule, error } = this.normalizeDiamondRule(op, min, max, uid);
+      if (error) {
+        this.log(`Cannot add TITS diamond rule: ${error}`, true);
+        return false;
+      }
+
+      const existingIndex = this.titsDiamondRules.findIndex(
+        r => r.op === rule.op && r.min === rule.min && r.max === rule.max
+      );
+      if (existingIndex >= 0) {
+        this.titsDiamondRules[existingIndex].triggerId = rule.triggerId;
+        this.log(`Updated TITS diamond rule: ${this.describeDiamondRule(rule)} -> ${uid}`);
+      } else {
+        this.titsDiamondRules.push(rule);
+        this.log(`Added TITS diamond rule: ${this.describeDiamondRule(rule)} -> ${uid}`);
+      }
+
+      this.sortDiamondRules(this.titsDiamondRules);
+      this.saveConfig();
+      this.emit('titsDiamondRuleChanged', this.getTitsDiamondRules());
+      return true;
+    }
+
+    removeTitsDiamondRule(index) {
+      if (index >= 0 && index < this.titsDiamondRules.length) {
+        const removed = this.titsDiamondRules.splice(index, 1)[0];
+        this.saveConfig();
+        this.emit('titsDiamondRuleChanged', this.getTitsDiamondRules());
+        this.log(`Removed TITS diamond rule: ${this.describeDiamondRule(removed)}`);
       }
     }
 
@@ -1058,6 +1289,14 @@ export class TikfinitySystem {
         if (loadedConfig.titsLikeMappings) {
           this.titsLikeMappings = loadedConfig.titsLikeMappings;
         }
+        if (Array.isArray(loadedConfig.diamondRules)) {
+          this.diamondRules = loadedConfig.diamondRules;
+          this.log(`Loaded ${this.diamondRules.length} diamond value rules from config`);
+        }
+        if (Array.isArray(loadedConfig.titsDiamondRules)) {
+          this.titsDiamondRules = loadedConfig.titsDiamondRules;
+          this.log(`Loaded ${this.titsDiamondRules.length} TITS diamond value rules from config`);
+        }
         if (loadedConfig.vconnectEnabled === false) {
           this.vconnectEnabled = false;
         }
@@ -1081,11 +1320,13 @@ export class TikfinitySystem {
       this._config.followUid = this.followUid;
       this._config.subscribeUid = this.subscribeUid;
       this._config.likeMappings = this.likeMappings;
+      this._config.diamondRules = this.diamondRules;
       this._config.titsTriggers = this.titsTriggers;
       this._config.titsGiftMappings = Object.fromEntries(this.titsGiftMappings);
       this._config.titsFollowId = this.titsFollowId;
       this._config.titsSubscribeId = this.titsSubscribeId;
       this._config.titsLikeMappings = this.titsLikeMappings;
+      this._config.titsDiamondRules = this.titsDiamondRules;
       this._config.vconnectEnabled = this.vconnectEnabled;
       this._config.titsEnabled = this.titsEnabled;
       this._config.lastUpdated = new Date().toISOString();

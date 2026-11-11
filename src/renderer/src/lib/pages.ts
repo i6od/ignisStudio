@@ -3,5 +3,7 @@ export type PageId =
   | 'triggers'
   | 'vconnect-mappings'
   | 'tits-mappings'
+  | 'gift-tracker'
+  | 'live-activity'
   | 'supporters'
   | 'about'

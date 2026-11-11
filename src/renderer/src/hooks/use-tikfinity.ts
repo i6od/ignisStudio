@@ -2,14 +2,30 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import TikfinitySystem, {
   type Trigger,
   type LikeMapping,
-  type StatusEvent
+  type DiamondRule,
+  type DiamondRuleOp,
+  type StatusEvent,
+  type TikTokFeedSource
 } from '@tikfinity'
+
+export interface FeedEventMeta {
+  sender?: string | null
+  senderId?: string | null
+  avatar?: string | null
+  giftName?: string | null
+  jewels?: number
+  combo?: number
+  repeat?: number
+  text?: string | null
+}
 
 export interface FeedEvent {
   type: 'gift' | 'follow' | 'subscribe' | 'like' | 'comment' | 'trigger'
   message: string
   detail: string
   ts: number
+  /** Structured fields for the combined TikTok + YouTube timeline. */
+  meta?: FeedEventMeta
 }
 
 export interface SupporterSummary {
@@ -17,6 +33,7 @@ export interface SupporterSummary {
   topGifter: { nickname: string | null; count: number } | null
   topLiker: { nickname: string | null; count: number } | null
   topCommenter: { nickname: string | null; count: number } | null
+  topJeweler: { nickname: string | null; count: number } | null
 }
 
 export type FireStatus = 'pending' | 'success' | 'error' | 'idle'
@@ -30,7 +47,27 @@ export interface FireResult {
 
 const URL_STORAGE_KEY = 'vconnectTikTokUrls'
 
-function loadUrls(): { vconnectUrl?: string; titsUrl?: string; tiktokUrl?: string } {
+/**
+ * Which TikTok event source the bridge listens to:
+ *  - 'tikfinity' : the external relay at urls.tiktokUrl (ws://localhost:21213)
+ *  - 'builtin'   : tiktok-live-connector running inside the app (main process),
+ *                  streaming straight into the same handlers — no relay, no port
+ */
+export type TikTokSource = 'tikfinity' | 'builtin'
+
+const DEFAULT_TIKTOK_USERNAME = 'xuhsy'
+
+function toFeedSource(source: TikTokSource): TikTokFeedSource {
+  return source === 'builtin' ? 'embedded' : 'relay'
+}
+
+function loadUrls(): {
+  vconnectUrl?: string
+  titsUrl?: string
+  tiktokUrl?: string
+  feedSource?: string
+  tiktokUsername?: string
+} {
   try {
     const raw = localStorage.getItem(URL_STORAGE_KEY)
     if (raw) {
@@ -64,14 +101,26 @@ function loadUrls(): { vconnectUrl?: string; titsUrl?: string; tiktokUrl?: strin
 export function useTikfinity() {
   const systemRef = useRef<TikfinitySystem | null>(null)
 
-  const [urls, setUrls] = useState<{ vconnectUrl: string; titsUrl: string; tiktokUrl: string }>(() => {
-    const saved = loadUrls()
-    return {
-      vconnectUrl: saved.vconnectUrl || 'ws://localhost:39542',
-      titsUrl: saved.titsUrl || 'ws://localhost:42069/websocket',
-      tiktokUrl: saved.tiktokUrl || 'ws://localhost:21213'
-    }
-  })
+  const [settings] = useState(loadUrls)
+
+  const [urls, setUrls] = useState<{ vconnectUrl: string; titsUrl: string; tiktokUrl: string }>(() => ({
+    vconnectUrl: settings.vconnectUrl || 'ws://localhost:39542',
+    titsUrl: settings.titsUrl || 'ws://localhost:42069/websocket',
+    tiktokUrl: settings.tiktokUrl || 'ws://localhost:21213'
+  }))
+
+  const [feedSource, setFeedSourceState] = useState<TikTokSource>(() =>
+    settings.feedSource === 'builtin' ? 'builtin' : 'tikfinity'
+  )
+  const [tiktokUsername, setTiktokUsernameState] = useState<string>(
+    () => settings.tiktokUsername || DEFAULT_TIKTOK_USERNAME
+  )
+  const [tiktokLiveError, setTiktokLiveError] = useState<string | null>(null)
+  // True while the user wants the TikTok feed up (set by Connect, cleared by
+  // Disconnect). The built-in feed effect keys off it so switching source or
+  // username restarts a live feed instead of silently going quiet.
+  const [feedWanted, setFeedWanted] = useState(false)
+  const feedSourceRef = useRef<TikTokSource>(feedSource)
 
   const [vconnectStatus, setVconnectStatus] = useState('Disconnected')
   const [titsStatus, setTitsStatus] = useState('Disconnected')
@@ -79,11 +128,13 @@ export function useTikfinity() {
   const [triggers, setTriggers] = useState<Trigger[]>([])
   const [giftMappings, setGiftMappings] = useState<[string, string][]>([])
   const [likeMappings, setLikeMappings] = useState<LikeMapping[]>([])
+  const [diamondRules, setDiamondRules] = useState<DiamondRule[]>([])
   const [followUid, setFollowUidState] = useState<string | null>(null)
   const [subscribeUid, setSubscribeUidState] = useState<string | null>(null)
   const [titsTriggers, setTitsTriggers] = useState<Trigger[]>([])
   const [titsGiftMappings, setTitsGiftMappings] = useState<[string, string][]>([])
   const [titsLikeMappings, setTitsLikeMappings] = useState<LikeMapping[]>([])
+  const [titsDiamondRules, setTitsDiamondRules] = useState<DiamondRule[]>([])
   const [titsFollowId, setTitsFollowIdState] = useState<string | null>(null)
   const [titsSubscribeId, setTitsSubscribeIdState] = useState<string | null>(null)
   const [titsUsersTracked, setTitsUsersTracked] = useState(0)
@@ -105,7 +156,8 @@ export function useTikfinity() {
           total: s.total,
           topGifter: s.topGifter ? { nickname: s.topGifter.nickname, count: s.topGifter.diamonds } : null,
           topLiker: s.topLiker ? { nickname: s.topLiker.nickname, count: s.topLiker.likes_count } : null,
-          topCommenter: s.topCommenter ? { nickname: s.topCommenter.nickname, count: s.topCommenter.comments_count } : null
+          topCommenter: s.topCommenter ? { nickname: s.topCommenter.nickname, count: s.topCommenter.comments_count } : null,
+          topJeweler: s.topJeweler ? { nickname: s.topJeweler.nickname, count: s.topJeweler.jewels } : null
         })
       })
       .catch(() => {})
@@ -115,35 +167,71 @@ export function useTikfinity() {
     const system = new TikfinitySystem({
       vconnectUrl: urls.vconnectUrl,
       titsUrl: urls.titsUrl,
-      tiktokUrl: urls.tiktokUrl
+      tiktokUrl: urls.tiktokUrl,
+      feedSource: toFeedSource(feedSourceRef.current)
     })
     systemRef.current = system
 
-    const pushEvent = (evt: Omit<FeedEvent, 'ts'>) => {
-      setEvents(prev => [...prev.slice(-49), { ...evt, ts: Date.now() }])
+    const pushEvent = (
+      evt: Omit<FeedEvent, 'ts'>,
+      ts = Date.now(),
+      extra?: Partial<EventLogInput>
+    ) => {
+      setEvents(prev => [...prev.slice(-49), { ...evt, ts, meta: extra }])
+      // Mirror real feed events (not bridge chatter) into the shared TikTok +
+      // YouTube timeline so the Live activity tab has history across restarts.
+      if (evt.type !== 'trigger') {
+        void window.vconnect?.events?.append?.({
+          source: 'tiktok',
+          kind: evt.type,
+          ts,
+          text: evt.detail,
+          refId: `tk:${evt.type}:${ts}:${evt.detail}`,
+          ...extra
+        })?.catch(() => {})
+      }
     }
 
     const onVcStatus = (data: unknown) => setVconnectStatus((data as StatusEvent).status)
-    const onTtStatus = (data: unknown) => setTiktokStatus((data as StatusEvent).status)
+    const onTtStatus = (data: unknown) => {
+      // With the built-in feed there is no relay socket, so the status shown in
+      // the UI must come from the main-process connector, not from here.
+      if (feedSourceRef.current === 'builtin') return
+      setTiktokStatus((data as StatusEvent).status)
+    }
     const onTriggers = (data: unknown) => setTriggers(data as Trigger[])
     const onMappingChanged = (data: unknown) => {
       const map = data as Map<string, string>
       setGiftMappings(Array.from(map.entries()))
     }
+    const onLikeMappings = (data: unknown) => setLikeMappings(data as LikeMapping[])
+    const onTitsLikeMappings = (data: unknown) => setTitsLikeMappings(data as LikeMapping[])
+    const onDiamondRules = (data: unknown) => setDiamondRules(data as DiamondRule[])
+    const onTitsDiamondRules = (data: unknown) => setTitsDiamondRules(data as DiamondRule[])
     const refreshSupporterSummary = () => {
       window.vconnect?.supporters.summary().then(s => {
         setSupporterSummary({
           total: s.total,
           topGifter: s.topGifter ? { nickname: s.topGifter.nickname, count: s.topGifter.diamonds } : null,
           topLiker: s.topLiker ? { nickname: s.topLiker.nickname, count: s.topLiker.likes_count } : null,
-          topCommenter: s.topCommenter ? { nickname: s.topCommenter.nickname, count: s.topCommenter.comments_count } : null
+          topCommenter: s.topCommenter ? { nickname: s.topCommenter.nickname, count: s.topCommenter.comments_count } : null,
+          topJeweler: s.topJeweler ? { nickname: s.topJeweler.nickname, count: s.topJeweler.jewels } : null
         })
       }).catch(() => {})
     }
 
     const onGift = (data: unknown) => {
       const g = data as { nickname?: string; uniqueId?: string; userId?: string; profilePictureUrl?: string; giftName?: string; repeatCount?: number; diamondCount?: number }
-      pushEvent({ type: 'gift', message: 'Gift', detail: `${g.nickname ?? '?'} sent ${g.giftName ?? '?'} x${g.repeatCount ?? 1}` })
+      const ts = Date.now()
+      const repeat = g.repeatCount ?? 1
+      pushEvent({ type: 'gift', message: 'Gift', detail: `${g.nickname ?? '?'} sent ${g.giftName ?? '?'} x${repeat}` }, ts, {
+        sender: g.nickname ?? g.uniqueId ?? null,
+        senderId: g.userId ?? g.uniqueId ?? null,
+        avatar: g.profilePictureUrl ?? null,
+        giftName: g.giftName ?? null,
+        repeat,
+        jewels: (g.diamondCount ?? 0) * repeat
+      })
       window.vconnect?.supporters.record({
         type: 'gift',
         userId: g.userId,
@@ -156,7 +244,13 @@ export function useTikfinity() {
     }
     const onFollow = (data: unknown) => {
       const f = data as { nickname?: string; uniqueId?: string; userId?: string; profilePictureUrl?: string }
-      pushEvent({ type: 'follow', message: 'Follow', detail: `${f.uniqueId ?? f.nickname ?? '?'} followed` })
+      const ts = Date.now()
+      pushEvent({ type: 'follow', message: 'Follow', detail: `${f.uniqueId ?? f.nickname ?? '?'} followed` }, ts, {
+        sender: f.uniqueId ?? f.nickname ?? null,
+        senderId: f.userId ?? f.uniqueId ?? null,
+        avatar: f.profilePictureUrl ?? null,
+        text: 'followed'
+      })
       window.vconnect?.supporters.record({
         type: 'follow',
         userId: f.userId,
@@ -167,7 +261,13 @@ export function useTikfinity() {
     }
     const onSubscribe = (data: unknown) => {
       const s = data as { nickname?: string; uniqueId?: string; userId?: string; profilePictureUrl?: string; subMonth?: number }
-      pushEvent({ type: 'subscribe', message: 'Subscribe', detail: `${s.nickname ?? s.uniqueId ?? '?'} subscribed` })
+      const ts = Date.now()
+      pushEvent({ type: 'subscribe', message: 'Subscribe', detail: `${s.nickname ?? s.uniqueId ?? '?'} subscribed` }, ts, {
+        sender: s.nickname ?? s.uniqueId ?? null,
+        senderId: s.userId ?? s.uniqueId ?? null,
+        avatar: s.profilePictureUrl ?? null,
+        text: s.subMonth ? `subscribed (month ${s.subMonth})` : 'subscribed'
+      })
       window.vconnect?.supporters.record({
         type: 'subscribe',
         userId: s.userId,
@@ -178,7 +278,15 @@ export function useTikfinity() {
     }
     const onLike = (data: unknown) => {
       const l = data as { nickname?: string; uniqueId?: string; userId?: string; profilePictureUrl?: string; likeCount?: number }
-      pushEvent({ type: 'like', message: 'Like', detail: `${l.nickname ?? l.uniqueId ?? '?'} liked x${l.likeCount ?? 1}` })
+      const ts = Date.now()
+      const likeCount = l.likeCount ?? 1
+      pushEvent({ type: 'like', message: 'Like', detail: `${l.nickname ?? l.uniqueId ?? '?'} liked x${likeCount}` }, ts, {
+        sender: l.nickname ?? l.uniqueId ?? null,
+        senderId: l.userId ?? l.uniqueId ?? null,
+        avatar: l.profilePictureUrl ?? null,
+        repeat: likeCount,
+        text: `liked x${likeCount}`
+      })
       window.vconnect?.supporters.record({
         type: 'like',
         userId: l.userId,
@@ -191,7 +299,13 @@ export function useTikfinity() {
     const onComment = (data: unknown) => {
       const c = data as { nickname?: string; uniqueId?: string; userId?: string; profilePictureUrl?: string; comment?: string; message?: string }
       const text = (c.comment ?? c.message ?? '').toString()
-      pushEvent({ type: 'comment', message: 'Comment', detail: `${c.nickname ?? c.uniqueId ?? '?'}: ${text.length > 60 ? text.slice(0, 57) + '...' : text}` })
+      const ts = Date.now()
+      pushEvent({ type: 'comment', message: 'Comment', detail: `${c.nickname ?? c.uniqueId ?? '?'}: ${text.length > 60 ? text.slice(0, 57) + '...' : text}` }, ts, {
+        sender: c.nickname ?? c.uniqueId ?? null,
+        senderId: c.userId ?? c.uniqueId ?? null,
+        avatar: c.profilePictureUrl ?? null,
+        text
+      })
       window.vconnect?.supporters.record({
         type: 'comment',
         userId: c.userId,
@@ -314,6 +428,10 @@ export function useTikfinity() {
     system.on('titsTriggersLoaded', onTitsTriggers)
     system.on('mappingChanged', onMappingChanged)
     system.on('titsMappingChanged', onTitsMappingChanged)
+    system.on('likeMappingChanged', onLikeMappings)
+    system.on('titsLikeMappingChanged', onTitsLikeMappings)
+    system.on('diamondRuleChanged', onDiamondRules)
+    system.on('titsDiamondRuleChanged', onTitsDiamondRules)
     system.on('gift', onGift)
     system.on('follow', onFollow)
     system.on('subscribe', onSubscribe)
@@ -333,24 +451,30 @@ export function useTikfinity() {
     setTriggers(system.getTriggers())
     setGiftMappings(Array.from(system.getGiftMappings().entries()))
     setLikeMappings(system.getLikeMappings())
+    setDiamondRules(system.getDiamondRules())
     setFollowUidState(system.followUid)
     setSubscribeUidState(system.subscribeUid)
     setTitsTriggers(system.getTitsTriggers())
     setTitsGiftMappings(Array.from(system.getTitsGiftMappings().entries()))
     setTitsLikeMappings(system.getTitsLikeMappings())
+    setTitsDiamondRules(system.getTitsDiamondRules())
     setTitsFollowIdState(system.titsFollowId)
     setTitsSubscribeIdState(system.titsSubscribeId)
     setVconnectEnabledState(system.vconnectEnabled)
     setTitsEnabledState(system.titsEnabled)
 
     return () => {
-    system.off('vconnectStatus', onVcStatus)
-    system.off('titsStatus', onTitsStatus)
-    system.off('tiktokStatus', onTtStatus)
-    system.off('triggersLoaded', onTriggers)
-    system.off('titsTriggersLoaded', onTitsTriggers)
-    system.off('mappingChanged', onMappingChanged)
-    system.off('titsMappingChanged', onTitsMappingChanged)
+      system.off('vconnectStatus', onVcStatus)
+      system.off('titsStatus', onTitsStatus)
+      system.off('tiktokStatus', onTtStatus)
+      system.off('triggersLoaded', onTriggers)
+      system.off('titsTriggersLoaded', onTitsTriggers)
+      system.off('mappingChanged', onMappingChanged)
+      system.off('titsMappingChanged', onTitsMappingChanged)
+      system.off('likeMappingChanged', onLikeMappings)
+      system.off('titsLikeMappingChanged', onTitsLikeMappings)
+      system.off('diamondRuleChanged', onDiamondRules)
+      system.off('titsDiamondRuleChanged', onTitsDiamondRules)
       system.off('gift', onGift)
       system.off('follow', onFollow)
       system.off('subscribe', onSubscribe)
@@ -360,12 +484,12 @@ export function useTikfinity() {
       system.off('triggerActivated', onTriggerActivated)
       system.off('triggerStarted', onTriggerStarted)
       system.off('triggerEnded', onTriggerEnded)
-    system.off('vconnectError', onVconnectError)
-    system.off('likeStats', onLikeStats)
-    system.off('titsTriggerFired', onTitsTriggerFired)
-    system.off('titsTriggerActivated', onTitsTriggerActivated)
-    system.off('titsLikeStats', onTitsLikeStats)
-    system.off('apiTogglesChanged', onApiToggles)
+      system.off('vconnectError', onVconnectError)
+      system.off('likeStats', onLikeStats)
+      system.off('titsTriggerFired', onTitsTriggerFired)
+      system.off('titsTriggerActivated', onTitsTriggerActivated)
+      system.off('titsLikeStats', onTitsLikeStats)
+      system.off('apiTogglesChanged', onApiToggles)
     // KILL the old sockets too — otherwise every effect re-run (e.g. saving
     // endpoints) leaves the previous system's WebSockets open against the same
     // relay/VConnect, and a single gift gets processed by BOTH systems -> the
@@ -377,18 +501,80 @@ export function useTikfinity() {
     }
   }, [urls.vconnectUrl, urls.titsUrl, urls.tiktokUrl])
 
+  // --------------------------------------------------------------------------
+  // TikTok feed source.
+  //
+  // 'builtin' hands the feed to the main process (tiktok-live-connector) and
+  // pipes each frame back in through ingestTikfinityFrame(), which runs the
+  // identical dedup/combo/mapping pipeline the relay frames go through.
+  // Switching source is applied to the live system instead of rebuilding it,
+  // so mappings and like totals survive the switch.
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    const system = systemRef.current
+    const api = window.vconnect?.tiktokLive
+
+    feedSourceRef.current = feedSource
+    system?.setFeedSource(toFeedSource(feedSource))
+
+    if (feedSource === 'tikfinity') {
+      // A leftover built-in socket would feed the same system alongside the
+      // relay, and every gift would fire its trigger twice.
+      api?.stop().catch(() => {})
+      setTiktokLiveError(null)
+      if (system && feedWanted) system.connectTikfinity()
+      return
+    }
+
+    if (!api) return
+
+    const offEvent = api.onEvent((frame) => {
+      systemRef.current?.ingestTikfinityFrame(frame)
+    })
+    const offStatus = api.onStatus((status) => {
+      setTiktokStatus(status.status)
+      setTiktokLiveError(status.error ?? null)
+    })
+
+    if (feedWanted && tiktokUsername.trim()) {
+      api
+        .start(tiktokUsername)
+        .then((status) => {
+          setTiktokStatus(status.status)
+          setTiktokLiveError(status.error ?? null)
+        })
+        .catch((err: unknown) => {
+          setTiktokStatus('Error')
+          setTiktokLiveError(err instanceof Error ? err.message : String(err))
+        })
+    } else {
+      api.stop().catch(() => {})
+      setTiktokStatus('Disconnected')
+      setTiktokLiveError(null)
+    }
+
+    return () => {
+      offEvent()
+      offStatus()
+      api.stop().catch(() => {})
+    }
+  }, [feedSource, tiktokUsername, feedWanted])
+
   const connect = useCallback(() => {
     const system = systemRef.current
     if (!system) return
     if (system.vconnectEnabled) system.connectVConnect()
     if (system.titsEnabled) system.connectTits()
+    // No-op when the built-in feed is selected; the feed effect starts it.
     system.connectTikfinity()
+    setFeedWanted(true)
   }, [])
 
   const disconnect = useCallback(() => {
     systemRef.current?.disconnectVConnect()
     systemRef.current?.disconnectTits()
     systemRef.current?.disconnectTikfinity()
+    setFeedWanted(false)
   }, [])
 
   const setVconnectEnabled = useCallback((enabled: boolean) => {
@@ -423,10 +609,53 @@ export function useTikfinity() {
     systemRef.current?.sendTitsTrigger(uid)
   }, [])
 
-  const applyUrls = useCallback((vc: string, tits: string, tt: string) => {
-    setUrls({ vconnectUrl: vc, titsUrl: tits, tiktokUrl: tt })
-    localStorage.setItem(URL_STORAGE_KEY, JSON.stringify({ vconnectUrl: vc, titsUrl: tits, tiktokUrl: tt }))
-  }, [])
+  const persistSettings = useCallback(
+    (override: { vconnectUrl?: string; titsUrl?: string; tiktokUrl?: string; feedSource?: TikTokSource; tiktokUsername?: string }) => {
+      localStorage.setItem(
+        URL_STORAGE_KEY,
+        JSON.stringify({
+          vconnectUrl: override.vconnectUrl ?? urls.vconnectUrl,
+          titsUrl: override.titsUrl ?? urls.titsUrl,
+          tiktokUrl: override.tiktokUrl ?? urls.tiktokUrl,
+          feedSource: override.feedSource ?? feedSource,
+          tiktokUsername: override.tiktokUsername ?? tiktokUsername
+        })
+      )
+    },
+    [urls, feedSource, tiktokUsername]
+  )
+
+  const applyUrls = useCallback(
+    (vc: string, tits: string, tt: string) => {
+      setUrls({ vconnectUrl: vc, titsUrl: tits, tiktokUrl: tt })
+      persistSettings({ vconnectUrl: vc, titsUrl: tits, tiktokUrl: tt })
+    },
+    [persistSettings]
+  )
+
+  const setFeedSource = useCallback(
+    (source: TikTokSource) => {
+      if (source === feedSource) return
+      feedSourceRef.current = source
+      setFeedSourceState(source)
+      persistSettings({ feedSource: source })
+    },
+    [feedSource, persistSettings]
+  )
+
+  /**
+   * Committed username (not per-keystroke): the feed effect restarts the
+   * built-in connection whenever this changes, so the UI calls it on Save.
+   */
+  const setTiktokUsername = useCallback(
+    (username: string) => {
+      const clean = username.trim().replace(/^@+/, '')
+      if (!clean || clean === tiktokUsername) return
+      setTiktokUsernameState(clean)
+      persistSettings({ tiktokUsername: clean })
+    },
+    [tiktokUsername, persistSettings]
+  )
 
   const addGiftMapping = useCallback((giftName: string, triggerId: string) => {
     return systemRef.current?.addGiftMapping(giftName, triggerId) ?? false
@@ -447,11 +676,19 @@ export function useTikfinity() {
   }, [])
 
   const addLikeMapping = useCallback((count: number, triggerId: string) => {
-    return systemRef.current?.addLikeMapping(count, triggerId) ?? false
+    const system = systemRef.current
+    if (!system) return false
+    const added = system.addLikeMapping(count, triggerId)
+    // The goal list is only useful if the table shows it straight away.
+    if (added) setLikeMappings(system.getLikeMappings())
+    return added
   }, [])
 
   const removeLikeMapping = useCallback((index: number) => {
-    systemRef.current?.removeLikeMapping(index)
+    const system = systemRef.current
+    if (!system) return
+    system.removeLikeMapping(index)
+    setLikeMappings(system.getLikeMappings())
   }, [])
 
   const clearLikeTracking = useCallback(() => {
@@ -481,11 +718,48 @@ export function useTikfinity() {
   }, [])
 
   const addTitsLikeMapping = useCallback((count: number, triggerId: string) => {
-    return systemRef.current?.addTitsLikeMapping(count, triggerId) ?? false
+    const system = systemRef.current
+    if (!system) return false
+    const added = system.addTitsLikeMapping(count, triggerId)
+    if (added) setTitsLikeMappings(system.getTitsLikeMappings())
+    return added
   }, [])
 
   const removeTitsLikeMapping = useCallback((index: number) => {
-    systemRef.current?.removeTitsLikeMapping(index)
+    const system = systemRef.current
+    if (!system) return
+    system.removeTitsLikeMapping(index)
+    setTitsLikeMappings(system.getTitsLikeMappings())
+  }, [])
+
+  const addDiamondRule = useCallback((op: DiamondRuleOp, min: number, max: number | null, triggerId: string) => {
+    const system = systemRef.current
+    if (!system) return false
+    const added = system.addDiamondRule(op, min, max, triggerId)
+    if (added) setDiamondRules(system.getDiamondRules())
+    return added
+  }, [])
+
+  const removeDiamondRule = useCallback((index: number) => {
+    const system = systemRef.current
+    if (!system) return
+    system.removeDiamondRule(index)
+    setDiamondRules(system.getDiamondRules())
+  }, [])
+
+  const addTitsDiamondRule = useCallback((op: DiamondRuleOp, min: number, max: number | null, triggerId: string) => {
+    const system = systemRef.current
+    if (!system) return false
+    const added = system.addTitsDiamondRule(op, min, max, triggerId)
+    if (added) setTitsDiamondRules(system.getTitsDiamondRules())
+    return added
+  }, [])
+
+  const removeTitsDiamondRule = useCallback((index: number) => {
+    const system = systemRef.current
+    if (!system) return
+    system.removeTitsDiamondRule(index)
+    setTitsDiamondRules(system.getTitsDiamondRules())
   }, [])
 
   const clearTitsLikeTracking = useCallback(() => {
@@ -496,27 +770,36 @@ export function useTikfinity() {
     return systemRef.current?.getTitsTriggerName(uid) ?? uid
   }, [])
 
-  const getTopSupporters = useCallback(async (metric: 'gifts' | 'likes' | 'comments', limit = 10) => {
-    try {
-      return (await window.vconnect?.supporters.top(metric, limit)) ?? []
-    } catch {
-      return []
-    }
-  }, [])
+  const getTopSupporters = useCallback(
+    async (metric: 'gifts' | 'likes' | 'comments' | 'jewels', limit = 10) => {
+      try {
+        return (await window.vconnect?.supporters.top(metric, limit)) ?? []
+      } catch {
+        return []
+      }
+    },
+    []
+  )
 
   return {
     urls,
     vconnectStatus,
     titsStatus,
     tiktokStatus,
+    tiktokLiveError,
+    feedSource,
+    tiktokUsername,
+    defaultTiktokUsername: DEFAULT_TIKTOK_USERNAME,
     triggers,
     giftMappings,
     likeMappings,
+    diamondRules,
     followUid,
     subscribeUid,
     titsTriggers,
     titsGiftMappings,
     titsLikeMappings,
+    titsDiamondRules,
     titsFollowId,
     titsSubscribeId,
     titsUsersTracked,
@@ -535,6 +818,8 @@ export function useTikfinity() {
     refreshTitsTriggers,
     activateTitsTrigger,
     applyUrls,
+    setFeedSource,
+    setTiktokUsername,
     addGiftMapping,
     removeGiftMapping,
     setFollowUid,
@@ -547,6 +832,10 @@ export function useTikfinity() {
     removeTitsLikeMapping,
     addLikeMapping,
     removeLikeMapping,
+    addDiamondRule,
+    removeDiamondRule,
+    addTitsDiamondRule,
+    removeTitsDiamondRule,
     clearLikeTracking,
     clearTitsLikeTracking,
     getTriggerName,
@@ -561,7 +850,8 @@ export function useTikfinity() {
           total: s.total,
           topGifter: s.topGifter ? { nickname: s.topGifter.nickname, count: s.topGifter.diamonds } : null,
           topLiker: s.topLiker ? { nickname: s.topLiker.nickname, count: s.topLiker.likes_count } : null,
-          topCommenter: s.topCommenter ? { nickname: s.topCommenter.nickname, count: s.topCommenter.comments_count } : null
+          topCommenter: s.topCommenter ? { nickname: s.topCommenter.nickname, count: s.topCommenter.comments_count } : null,
+          topJeweler: s.topJeweler ? { nickname: s.topJeweler.nickname, count: s.topJeweler.jewels } : null
         })
       }).catch(() => {})
     }

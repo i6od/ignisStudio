@@ -2,6 +2,7 @@ import { Gift, Heart, Rocket, Trash2, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 
 import { PageSection } from '@/components/page-section'
+import { DiamondRulesSection } from '@/components/diamond-rules'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -70,6 +71,16 @@ export function MappingsPage({ tk }: { tk: Tk }) {
           />
         </div>
       </PageSection>
+
+      <DiamondRulesSection
+        title="Diamond value rules"
+        rules={tk.diamondRules}
+        triggers={tk.triggers}
+        triggerName={tk.getTriggerName}
+        onAdd={(op, min, max, uid) => tk.addDiamondRule(op, min, max, uid)}
+        onRemove={i => tk.removeDiamondRule(i)}
+        triggerPlaceholder="Trigger…"
+      />
 
       <PageSection
         icon={<Rocket className="h-4 w-4" />}
